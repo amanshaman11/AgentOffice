@@ -1,24 +1,33 @@
 "use client";
 
+import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrthographicCamera, OrbitControls } from "@react-three/drei";
-import { EffectComposer, Bloom } from "@react-three/postprocessing";
+import { useShallow } from "zustand/shallow";
 import { Room } from "./Room";
 import { Stage } from "./Stage";
 import { AgentSprite } from "./AgentSprite";
-import { useAgentStore } from "@/lib/store/agents";
-import { semiCircleSlots } from "@/lib/layout";
+import { Effects } from "./Effects";
+import {
+  useAgentStore,
+  selectActiveAgents,
+} from "@/lib/store/agents";
+import { semiCircleSlots, STAGE_POSITION } from "@/lib/layout";
 
 export default function RoomScene() {
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useAgentStore(useShallow(selectActiveAgents));
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
+  const selectAgent = useAgentStore((s) => s.selectAgent);
+  const run = useAgentStore((s) => s.run);
+
   const slots = semiCircleSlots(agents.length);
 
   return (
     <Canvas
       shadows
       dpr={[1, 1.75]}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
       style={{ width: "100%", height: "100%" }}
+      onPointerMissed={() => selectAgent(null)}
     >
       <color attach="background" args={["#07070d"]} />
       <fog attach="fog" args={["#07070d", 14, 26]} />
@@ -61,25 +70,34 @@ export default function RoomScene() {
         color="#c25bff"
       />
 
-      <Room />
-      <Stage />
+      <Suspense fallback={null}>
+        <Room />
+        <Stage />
+      </Suspense>
 
-      {agents.map((agent, i) => (
-        <AgentSprite
-          key={agent.id}
-          roleId={agent.roleId}
-          targetPosition={slots[i].position}
-        />
-      ))}
+      {agents.map((agent, i) => {
+        const isActive = run.activeAgentId === agent.id;
+        const isOnStage =
+          isActive && (run.phase === "walking-to-stage" || run.phase === "speaking");
+        const target: [number, number, number] = isOnStage
+          ? STAGE_POSITION
+          : (slots[i]?.position ?? [0, 0, 0]);
+        return (
+          <AgentSprite
+            key={agent.id}
+            id={agent.id}
+            roleId={agent.roleId}
+            name={agent.name}
+            targetPosition={target}
+            selected={selectedAgentId === agent.id}
+            active={isActive}
+            phase={isActive ? run.phase : "idle"}
+            onSelect={selectAgent}
+          />
+        );
+      })}
 
-      <EffectComposer>
-        <Bloom
-          intensity={0.9}
-          luminanceThreshold={0.15}
-          luminanceSmoothing={0.2}
-          mipmapBlur
-        />
-      </EffectComposer>
+      <Effects />
     </Canvas>
   );
 }
