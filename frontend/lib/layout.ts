@@ -1,4 +1,7 @@
-export const SEMI_CIRCLE_RADIUS = 2.6;
+export const SEMI_CIRCLE_RADIUS = 2.9;
+
+// Where active agents walk to during a run.
+export const STAGE_POSITION: [number, number, number] = [0, 0, 0.9];
 
 export interface AgentSlot {
   position: [number, number, number];
