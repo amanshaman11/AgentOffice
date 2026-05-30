@@ -2,9 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { TopBar } from "@/components/shell/TopBar";
+import { LeftRail } from "@/components/shell/LeftRail";
 import { OfficesPanel } from "@/components/shell/OfficesPanel";
+import { GeminiChat } from "@/components/shell/GeminiChat";
 import { BottomHud } from "@/components/shell/BottomHud";
 import { AgentRoster } from "@/components/shell/AgentRoster";
+import { RightCollapsedTab } from "@/components/shell/RightCollapsedTab";
+import { useUiStore } from "@/lib/store/ui";
 
 const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
   ssr: false,
@@ -16,11 +20,16 @@ const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
 });
 
 export default function Home() {
+  const activeLeft = useUiStore((s) => s.activeLeft);
+  const rightOpen = useUiStore((s) => s.rightOpen);
+
   return (
     <div className="h-screen flex flex-col">
       <TopBar />
       <div className="flex-1 flex min-h-0">
-        <OfficesPanel />
+        <LeftRail />
+        {activeLeft === "offices" && <OfficesPanel />}
+        {activeLeft === "chat" && <GeminiChat />}
 
         <main className="flex-1 relative min-w-0">
           {/* Tagline overlay */}
@@ -41,7 +50,7 @@ export default function Home() {
           <RoomScene />
         </main>
 
-        <AgentRoster />
+        {rightOpen ? <AgentRoster /> : <RightCollapsedTab />}
       </div>
       <BottomHud />
     </div>
