@@ -1,17 +1,13 @@
 "use client";
 
-import { Bell, Hexagon, User } from "lucide-react";
+import Image from "next/image";
+import { Bell, User } from "lucide-react";
 
 export function TopBar() {
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_70%,transparent)] backdrop-blur-md">
-      <div className="flex items-center gap-2">
-        <Hexagon
-          size={22}
-          className="text-[var(--color-neon-violet)]"
-          style={{ filter: "drop-shadow(0 0 8px var(--color-neon-violet))" }}
-        />
-        <span className="font-semibold tracking-wide">AgentOffice</span>
+      <div className="flex items-center">
+        <Image src="/agent_office.png" alt="Agent Office" width={150} height={38} priority />
       </div>
 
       <div className="flex items-center gap-3">
