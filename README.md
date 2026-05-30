@@ -40,7 +40,7 @@ Agents collaborate, review each other's work, and can intervene when errors are 
 | Ruslan Kim |	Product Manager |
 | Arhan Us	| Lead Developer |
 
-#Future Vision
+## Future Vision
 
 AgentOffice will evolve into a platform where users can build complete AI teams for:
 
