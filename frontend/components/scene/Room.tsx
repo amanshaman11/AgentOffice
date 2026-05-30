@@ -69,39 +69,6 @@ export function Room() {
 
       {/* Neon floor border */}
       <FloorBorder size={FLOOR_SIZE} />
-
-      {/* Back wall panel */}
-      <mesh position={[0, 1.6, -FLOOR_SIZE / 2 + 0.1]}>
-        <boxGeometry args={[FLOOR_SIZE - 0.4, 3.2, 0.08]} />
-        <meshStandardMaterial
-          color="#0d0f1a"
-          roughness={0.6}
-          metalness={0.3}
-          emissive="#1a1e36"
-          emissiveIntensity={0.4}
-        />
-      </mesh>
-
-      {/* Side wall panels (low) */}
-      <mesh position={[-FLOOR_SIZE / 2 + 0.1, 0.8, -FLOOR_SIZE / 4]}>
-        <boxGeometry args={[0.08, 1.6, FLOOR_SIZE / 2]} />
-        <meshStandardMaterial color="#0d0f1a" roughness={0.6} />
-      </mesh>
-      <mesh position={[FLOOR_SIZE / 2 - 0.1, 0.8, -FLOOR_SIZE / 4]}>
-        <boxGeometry args={[0.08, 1.6, FLOOR_SIZE / 2]} />
-        <meshStandardMaterial color="#0d0f1a" roughness={0.6} />
-      </mesh>
-
-      {/* Neon strip along the top of the back wall */}
-      <mesh position={[0, 3.18, -FLOOR_SIZE / 2 + 0.18]}>
-        <boxGeometry args={[FLOOR_SIZE - 0.4, 0.04, 0.04]} />
-        <meshStandardMaterial
-          color="#8a7bff"
-          emissive="#8a7bff"
-          emissiveIntensity={3}
-          toneMapped={false}
-        />
-      </mesh>
     </group>
   );
 }

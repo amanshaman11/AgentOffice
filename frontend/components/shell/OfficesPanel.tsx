@@ -8,9 +8,11 @@ import {
   Code2,
   X,
   Check,
+  PanelLeftClose,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAgentStore } from "@/lib/store/agents";
+import { useUiStore } from "@/lib/store/ui";
 import type { OfficeType } from "@/lib/roles";
 
 export function OfficesPanel() {
@@ -20,6 +22,8 @@ export function OfficesPanel() {
   const setActiveOffice = useAgentStore((s) => s.setActiveOffice);
   const addOffice = useAgentStore((s) => s.addOffice);
   const removeOffice = useAgentStore((s) => s.removeOffice);
+
+  const setActiveLeft = useUiStore((s) => s.setActiveLeft);
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -36,9 +40,18 @@ export function OfficesPanel() {
 
   return (
     <aside className="w-64 shrink-0 p-3 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-y-auto">
-      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
-        <Building2 size={12} />
-        Offices
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
+        <span className="flex items-center gap-2">
+          <Building2 size={12} />
+          Offices
+        </span>
+        <button
+          onClick={() => setActiveLeft(null)}
+          aria-label="Close panel"
+          className="p-1 -mr-1 normal-case tracking-normal text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)] transition"
+        >
+          <PanelLeftClose size={13} />
+        </button>
       </div>
 
       {creating ? (
