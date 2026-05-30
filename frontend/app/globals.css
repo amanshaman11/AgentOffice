@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-0: #07070d;
+  --color-bg-1: #0d0f1a;
+  --color-bg-2: #14172a;
+  --color-bg-3: #1a1e36;
+  --color-stroke: #1f2540;
+  --color-stroke-bright: #2b3358;
+
+  --color-text-primary: #e6e8ff;
+  --color-text-muted: #8b90b8;
+  --color-text-dim: #5a5f82;
+
+  --color-neon-cyan: #4ad6ff;
+  --color-neon-violet: #8a7bff;
+  --color-neon-magenta: #c25bff;
+  --color-neon-pink: #ff5bd1;
+  --color-neon-green: #43e3a4;
+  --color-neon-amber: #ffb547;
+
+  --shadow-glow-cyan: 0 0 24px rgb(74 214 255 / 0.55);
+  --shadow-glow-violet: 0 0 24px rgb(138 123 255 / 0.55);
+
+  --radius-panel: 14px;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg-0);
+  color: var(--color-text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  background-image:
+    radial-gradient(1200px 600px at 50% -10%, rgb(138 123 255 / 0.12), transparent 60%),
+    radial-gradient(900px 500px at 0% 100%, rgb(74 214 255 / 0.08), transparent 60%),
+    radial-gradient(900px 500px at 100% 100%, rgb(194 91 255 / 0.08), transparent 60%);
+}
+
+@layer components {
+  .panel {
+    background: color-mix(in oklab, var(--color-bg-1) 80%, transparent);
+    border: 1px solid var(--color-stroke);
+    border-radius: var(--radius-panel);
+    backdrop-filter: blur(10px);
+  }
+
+  .panel-raised {
+    background: color-mix(in oklab, var(--color-bg-2) 85%, transparent);
+    border: 1px solid var(--color-stroke-bright);
+    border-radius: var(--radius-panel);
+    backdrop-filter: blur(10px);
+  }
+
+  .btn-neon {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    border-radius: 10px;
+    border: 1px solid color-mix(in oklab, var(--color-neon-violet) 50%, transparent);
+    background: color-mix(in oklab, var(--color-neon-violet) 14%, transparent);
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .btn-neon:hover {
+    background: color-mix(in oklab, var(--color-neon-violet) 24%, transparent);
+    box-shadow: var(--shadow-glow-violet);
+  }
+  .btn-neon:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid var(--color-stroke);
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.825rem;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .btn-ghost:hover {
+    border-color: var(--color-stroke-bright);
+    color: var(--color-text-primary);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-stroke);
+    background: var(--color-bg-2);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+
+  .status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    box-shadow: 0 0 8px currentColor;
+  }
+}
