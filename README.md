@@ -6,7 +6,7 @@
 
 AgentOffice is a multi-agent workspace that allows users to create AI-powered offices for different tasks without building complex workflows manually.
 
-Instead of configuring automation tools like n8n or writing code, users simply choose an office type, add agents, and run a complete AI workflow.
+Instead of configuring automation tools like n8n or writing code, users simply add built-in agents, and run a complete AI workflow.
 
 Our vision is to make AI collaboration accessible through a visual office environment where agents communicate, validate each other's work, and deliver final results to the user.
 
@@ -26,10 +26,9 @@ This creates a high barrier for students, researchers, entrepreneurs, and non-te
 AgentOffice allows users to create an AI office instead of building workflows manually.
 
 **Simple process:**
-1. Select an office type
-2. Add AI agents
-3. Run the office
-4. Receive validated results
+1. Add AI agents
+2. Run the office
+3. Receive validated results
 
 Agents collaborate, review each other's work, and can intervene when errors are detected.
 

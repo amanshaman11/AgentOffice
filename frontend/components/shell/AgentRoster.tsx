@@ -1,47 +1,104 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, X, Users, Pencil, Check, PanelRightClose } from "lucide-react";
 import clsx from "clsx";
-import { ROLES, ROLE_LIST, type RoleId, type OfficeType } from "@/lib/roles";
-import { useAgentStore } from "@/lib/store/agents";
+import {
+  ROLES,
+  ROLE_LIST,
+  type RoleId,
+  type OfficeType,
+} from "@/lib/roles";
+import { useShallow } from "zustand/shallow";
+import {
+  useAgentStore,
+  selectActiveAgents,
+  selectActiveOffice,
+} from "@/lib/store/agents";
+import { runOffice, stopRun } from "@/lib/runner";
+import { Play, Square, Loader2 } from "lucide-react";
+import { useUiStore } from "@/lib/store/ui";
 
 export function AgentRoster() {
-  const agents = useAgentStore((s) => s.agents);
+  const office = useAgentStore(selectActiveOffice);
+  const agents = useAgentStore(useShallow(selectActiveAgents));
   const addAgent = useAgentStore((s) => s.addAgent);
   const removeAgent = useAgentStore((s) => s.removeAgent);
-  const clear = useAgentStore((s) => s.clear);
+  const renameAgent = useAgentStore((s) => s.renameAgent);
+  const clearAgents = useAgentStore((s) => s.clearAgents);
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
+  const selectAgent = useAgentStore((s) => s.selectAgent);
+  const run = useAgentStore((s) => s.run);
+  const setRightOpen = useUiStore((s) => s.setRightOpen);
+
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [officeFilter, setOfficeFilter] = useState<OfficeType>("research");
+  // Show only the active office's roles by default, but let user override
+  const [officeFilter, setOfficeFilter] = useState<OfficeType>(office.type);
+  useEffect(() => {
+    setOfficeFilter(office.type);
+  }, [office.type]);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.select();
+    }
+  }, [editingId]);
 
   const handleAdd = (roleId: RoleId) => {
     addAgent(roleId);
     setPickerOpen(false);
   };
 
+  const beginEdit = (id: string, current: string) => {
+    setEditingId(id);
+    setEditValue(current);
+  };
+  const commitEdit = () => {
+    if (editingId) renameAgent(editingId, editValue);
+    setEditingId(null);
+  };
+
   const visibleRoles = ROLE_LIST.filter((r) => r.office === officeFilter);
+  const canRun = agents.length > 0 && !run.isRunning;
+
+  const handleRun = () => {
+    if (run.isRunning) {
+      stopRun();
+    } else {
+      runOffice(agents);
+    }
+  };
 
   return (
     <aside className="w-72 shrink-0 p-3 border-l border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-hidden">
       <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
         <span className="flex items-center gap-1.5">
           <Users size={12} />
-          Agents · {agents.length}
+          {office.name}
         </span>
-        {agents.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="normal-case tracking-normal">
+            {agents.length} agents
+          </span>
           <button
-            onClick={clear}
-            className="text-[10px] hover:text-[var(--color-text-primary)] transition"
+            onClick={() => setRightOpen(false)}
+            aria-label="Close panel"
+            className="p-1 -mr-1 text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)] transition"
           >
-            Clear
+            <PanelRightClose size={13} />
           </button>
-        )}
+        </div>
       </div>
 
       <div className="relative">
         <button
           onClick={() => setPickerOpen((v) => !v)}
           className="btn-neon w-full justify-center"
+          disabled={run.isRunning}
         >
           <Plus size={14} />
           Add Agent
@@ -74,10 +131,7 @@ export function AgentRoster() {
                 >
                   <span
                     className="status-dot mt-1.5 shrink-0"
-                    style={{
-                      background: role.color,
-                      color: role.color,
-                    }}
+                    style={{ background: role.color, color: role.color }}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{role.name}</div>
@@ -92,7 +146,50 @@ export function AgentRoster() {
         )}
       </div>
 
-      <div className="flex flex-col gap-1.5 mt-1 overflow-y-auto pr-1">
+      <div className="flex gap-2">
+        <button
+          onClick={handleRun}
+          disabled={!canRun && !run.isRunning}
+          className={clsx(
+            "flex-1 justify-center",
+            run.isRunning ? "btn-neon" : "btn-neon",
+          )}
+          style={
+            run.isRunning
+              ? {
+                  borderColor:
+                    "color-mix(in oklab, var(--color-neon-pink) 50%, transparent)",
+                  background:
+                    "color-mix(in oklab, var(--color-neon-pink) 14%, transparent)",
+                }
+              : undefined
+          }
+        >
+          {run.isRunning ? (
+            <>
+              <Square size={14} />
+              Stop
+            </>
+          ) : (
+            <>
+              <Play size={14} />
+              Run Office
+            </>
+          )}
+        </button>
+        {agents.length > 0 && !run.isRunning && (
+          <button
+            onClick={clearAgents}
+            className="btn-ghost"
+            aria-label="Clear all agents"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Roster */}
+      <div className="flex flex-col gap-1.5 mt-1 overflow-y-auto pr-1 max-h-[40%]">
         {agents.length === 0 ? (
           <div className="panel p-4 text-center">
             <div className="text-xs text-[var(--color-text-muted)] leading-relaxed">
@@ -104,38 +201,167 @@ export function AgentRoster() {
         ) : (
           agents.map((a, i) => {
             const role = ROLES[a.roleId];
+            const isSelected = selectedAgentId === a.id;
+            const isActive = run.activeAgentId === a.id;
             return (
               <div
                 key={a.id}
-                className="panel flex items-center gap-2 px-3 py-2 group"
+                onClick={() => selectAgent(isSelected ? null : a.id)}
+                className={clsx(
+                  "panel flex items-center gap-2 px-3 py-2 group cursor-pointer transition",
+                  isSelected &&
+                    "border-[color-mix(in_oklab,var(--color-neon-violet)_60%,transparent)]",
+                  isActive &&
+                    "shadow-[0_0_18px_color-mix(in_oklab,var(--color-neon-cyan)_55%,transparent)]",
+                )}
               >
                 <span
                   className="status-dot shrink-0"
                   style={{ background: role.color, color: role.color }}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {role.name}{" "}
-                    <span className="text-[var(--color-text-dim)] text-xs">
-                      #{i + 1}
-                    </span>
-                  </div>
+                  {editingId === a.id ? (
+                    <input
+                      ref={editInputRef}
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={commitEdit}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitEdit();
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full bg-[var(--color-bg-0)] border border-[var(--color-stroke)] rounded px-1.5 py-0.5 text-sm focus:outline-none focus:border-[var(--color-neon-violet)]"
+                    />
+                  ) : (
+                    <div className="text-sm font-medium truncate">
+                      {a.name}{" "}
+                      <span className="text-[var(--color-text-dim)] text-xs">
+                        #{i + 1}
+                      </span>
+                    </div>
+                  )}
                   <div className="text-[10px] text-[var(--color-text-dim)] truncate">
-                    {role.description}
+                    {role.name} · {role.description}
                   </div>
                 </div>
-                <button
-                  onClick={() => removeAgent(a.id)}
-                  aria-label="Remove agent"
-                  className="opacity-0 group-hover:opacity-100 transition text-[var(--color-text-dim)] hover:text-[var(--color-neon-pink)]"
-                >
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      editingId === a.id
+                        ? commitEdit()
+                        : beginEdit(a.id, a.name);
+                    }}
+                    aria-label="Rename agent"
+                    className="text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {editingId === a.id ? (
+                      <Check size={14} />
+                    ) : (
+                      <Pencil size={12} />
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeAgent(a.id);
+                    }}
+                    aria-label="Remove agent"
+                    disabled={run.isRunning}
+                    className="text-[var(--color-text-dim)] hover:text-[var(--color-neon-pink)] disabled:opacity-40"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             );
           })
         )}
       </div>
+
+      {/* Activity log */}
+      <ActivityLog />
     </aside>
+  );
+}
+
+function ActivityLog() {
+  const log = useAgentStore((s) => s.run.log);
+  const isRunning = useAgentStore((s) => s.run.isRunning);
+  const agents = useAgentStore((s) => s.agents);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [log.length]);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col gap-2 pt-2 border-t border-[var(--color-stroke)]">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
+        {isRunning ? (
+          <Loader2 size={11} className="animate-spin" />
+        ) : (
+          <span className="status-dot" style={{ background: "var(--color-text-dim)", color: "var(--color-text-dim)" }} />
+        )}
+        Activity Log
+      </div>
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1 pr-1"
+      >
+        {log.length === 0 ? (
+          <div className="text-[11px] text-[var(--color-text-dim)] px-1 py-2">
+            No activity yet. Click <span className="text-[var(--color-text-muted)]">Run Office</span> to start.
+          </div>
+        ) : (
+          log.map((step, idx) => {
+            const agent = agents.find((a) => a.id === step.agentId);
+            const role = agent ? ROLES[agent.roleId] : null;
+            return (
+              <div
+                key={idx}
+                className="panel px-2.5 py-1.5 text-[11px] leading-snug"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="status-dot shrink-0"
+                    style={{
+                      background: role?.color ?? "#888",
+                      color: role?.color ?? "#888",
+                    }}
+                  />
+                  <span className="font-medium truncate">
+                    {agent?.name ?? "Agent"}
+                  </span>
+                  {step.verdict && (
+                    <span
+                      className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+                      style={{
+                        color:
+                          step.verdict === "pass"
+                            ? "var(--color-neon-green)"
+                            : "var(--color-neon-pink)",
+                        background:
+                          step.verdict === "pass"
+                            ? "color-mix(in oklab, var(--color-neon-green) 15%, transparent)"
+                            : "color-mix(in oklab, var(--color-neon-pink) 15%, transparent)",
+                      }}
+                    >
+                      {step.verdict}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[var(--color-text-muted)] mt-0.5">
+                  {step.message}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
