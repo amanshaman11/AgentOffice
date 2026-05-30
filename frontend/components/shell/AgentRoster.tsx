@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, X, Users, Pencil, Check } from "lucide-react";
+import { Plus, X, Users, Pencil, Check, PanelRightClose } from "lucide-react";
 import clsx from "clsx";
 import {
   ROLES,
@@ -17,6 +17,7 @@ import {
 } from "@/lib/store/agents";
 import { runOffice, stopRun } from "@/lib/runner";
 import { Play, Square, Loader2 } from "lucide-react";
+import { useUiStore } from "@/lib/store/ui";
 
 export function AgentRoster() {
   const office = useAgentStore(selectActiveOffice);
@@ -28,6 +29,7 @@ export function AgentRoster() {
   const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
   const selectAgent = useAgentStore((s) => s.selectAgent);
   const run = useAgentStore((s) => s.run);
+  const setRightOpen = useUiStore((s) => s.setRightOpen);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   // Show only the active office's roles by default, but let user override
@@ -78,7 +80,18 @@ export function AgentRoster() {
           <Users size={12} />
           {office.name}
         </span>
-        <span>{agents.length} agents</span>
+        <div className="flex items-center gap-2">
+          <span className="normal-case tracking-normal">
+            {agents.length} agents
+          </span>
+          <button
+            onClick={() => setRightOpen(false)}
+            aria-label="Close panel"
+            className="p-1 -mr-1 text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)] transition"
+          >
+            <PanelRightClose size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="relative">
