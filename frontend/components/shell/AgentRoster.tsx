@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, X, Users, Pencil, Check, PanelRightClose } from "lucide-react";
+import {
+  Plus,
+  X,
+  Users,
+  Pencil,
+  Check,
+  PanelRightClose,
+  MessageSquare,
+  Square,
+  Loader2,
+} from "lucide-react";
 import clsx from "clsx";
 import {
   ROLES,
@@ -15,8 +25,7 @@ import {
   selectActiveAgents,
   selectActiveOffice,
 } from "@/lib/store/agents";
-import { runOffice, stopRun } from "@/lib/runner";
-import { Play, Square, Loader2 } from "lucide-react";
+import { stopRun } from "@/lib/runner";
 import { useUiStore } from "@/lib/store/ui";
 
 export function AgentRoster() {
@@ -30,6 +39,7 @@ export function AgentRoster() {
   const selectAgent = useAgentStore((s) => s.selectAgent);
   const run = useAgentStore((s) => s.run);
   const setRightOpen = useUiStore((s) => s.setRightOpen);
+  const focusChat = useUiStore((s) => s.focusChat);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   // Show only the active office's roles by default, but let user override
@@ -63,13 +73,12 @@ export function AgentRoster() {
   };
 
   const visibleRoles = ROLE_LIST.filter((r) => r.office === officeFilter);
-  const canRun = agents.length > 0 && !run.isRunning;
 
   const handleRun = () => {
     if (run.isRunning) {
       stopRun();
     } else {
-      runOffice(agents);
+      focusChat();
     }
   };
 
@@ -149,11 +158,7 @@ export function AgentRoster() {
       <div className="flex gap-2">
         <button
           onClick={handleRun}
-          disabled={!canRun && !run.isRunning}
-          className={clsx(
-            "flex-1 justify-center",
-            run.isRunning ? "btn-neon" : "btn-neon",
-          )}
+          className="btn-neon flex-1 justify-center"
           style={
             run.isRunning
               ? {
@@ -164,6 +169,7 @@ export function AgentRoster() {
                 }
               : undefined
           }
+          title={run.isRunning ? "Stop current run" : "Open chat to send a query"}
         >
           {run.isRunning ? (
             <>
@@ -172,8 +178,8 @@ export function AgentRoster() {
             </>
           ) : (
             <>
-              <Play size={14} />
-              Run Office
+              <MessageSquare size={14} />
+              Run via Chat
             </>
           )}
         </button>
@@ -314,12 +320,34 @@ function ActivityLog() {
       >
         {log.length === 0 ? (
           <div className="text-[11px] text-[var(--color-text-dim)] px-1 py-2">
-            No activity yet. Click <span className="text-[var(--color-text-muted)]">Run Office</span> to start.
+            No activity yet. Open <span className="text-[var(--color-text-muted)]">Chat</span> and send a query.
           </div>
         ) : (
           log.map((step, idx) => {
             const agent = agents.find((a) => a.id === step.agentId);
-            const role = agent ? ROLES[agent.roleId] : null;
+            const role = agent
+              ? ROLES[agent.roleId]
+              : step.roleId
+                ? ROLES[step.roleId]
+                : null;
+            const isSystem = step.agentId.startsWith("_system");
+            const isMissing = step.agentId.startsWith("_missing");
+
+            if (isSystem) {
+              return (
+                <div
+                  key={idx}
+                  className="text-[11px] text-[var(--color-text-dim)] italic px-2 py-1"
+                >
+                  {step.message}
+                </div>
+              );
+            }
+
+            const name = isMissing
+              ? `${role?.name ?? "Agent"} (not in room)`
+              : (agent?.name ?? role?.name ?? "Agent");
+
             return (
               <div
                 key={idx}
@@ -333,9 +361,7 @@ function ActivityLog() {
                       color: role?.color ?? "#888",
                     }}
                   />
-                  <span className="font-medium truncate">
-                    {agent?.name ?? "Agent"}
-                  </span>
+                  <span className="font-medium truncate">{name}</span>
                   {step.verdict && (
                     <span
                       className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
@@ -354,7 +380,7 @@ function ActivityLog() {
                     </span>
                   )}
                 </div>
-                <div className="text-[var(--color-text-muted)] mt-0.5">
+                <div className="text-[var(--color-text-muted)] mt-0.5 whitespace-pre-wrap break-words">
                   {step.message}
                 </div>
               </div>

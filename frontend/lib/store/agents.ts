@@ -27,7 +27,7 @@ export type RunPhase =
 export interface RunStep {
   ts: number;
   agentId: string;
-  roleId: RoleId;
+  roleId?: RoleId;
   message: string;
   verdict?: "pass" | "revise";
 }
