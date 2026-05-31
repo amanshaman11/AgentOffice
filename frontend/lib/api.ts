@@ -24,7 +24,7 @@ export interface OrchestrationResult {
   goal: string;
   plan: Plan;
   success: boolean;
-  outputs: Record<string, AgentResult>;
+  outputs: Record<string, AgentResult>;  // keys are step numbers as strings ("1", "2", …)
   final_output: string;
   log: string[];
 }
@@ -32,6 +32,17 @@ export interface OrchestrationResult {
 export interface HealthResponse {
   status: string;
   gemini_key: string;
+}
+
+export interface WorkflowSuggestion {
+  suggested_agents: string[];
+  rationale: string;
+}
+
+export interface RunPayload {
+  query: string;
+  office_type: "research" | "developer";
+  agents: string[];
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -71,16 +82,26 @@ export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return http<HealthResponse>("/api/health", { signal });
 }
 
-export function getPlan(query: string): Promise<Plan> {
+export function getPlan(payload: RunPayload): Promise<Plan> {
   return http<Plan>("/api/plan", {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(payload),
   });
 }
 
-export function runQuery(query: string): Promise<OrchestrationResult> {
+export function runQuery(payload: RunPayload): Promise<OrchestrationResult> {
   return http<OrchestrationResult>("/api/run", {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export function suggestWorkflow(
+  query: string,
+  office_type: "research" | "developer" = "research",
+): Promise<WorkflowSuggestion> {
+  return http<WorkflowSuggestion>("/api/suggest-workflow", {
+    method: "POST",
+    body: JSON.stringify({ query, office_type }),
   });
 }

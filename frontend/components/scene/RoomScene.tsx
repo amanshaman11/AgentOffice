@@ -22,6 +22,15 @@ export default function RoomScene() {
 
   const slots = semiCircleSlots(agents.length);
 
+  const activeMessage = (() => {
+    if (!run.activeAgentId || run.phase !== "speaking") return "";
+    for (let i = run.log.length - 1; i >= 0; i--) {
+      const step = run.log[i];
+      if (step.agentId === run.activeAgentId && step.message) return step.message;
+    }
+    return "";
+  })();
+
   return (
     <Canvas
       shadows
@@ -92,6 +101,7 @@ export default function RoomScene() {
             selected={selectedAgentId === agent.id}
             active={isActive}
             phase={isActive ? run.phase : "idle"}
+            message={isActive && run.phase === "speaking" ? activeMessage : ""}
             onSelect={selectAgent}
           />
         );

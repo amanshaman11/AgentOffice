@@ -74,6 +74,9 @@ export function AgentRoster() {
 
   const visibleRoles = ROLE_LIST.filter((r) => r.office === officeFilter);
 
+  const isDevOffice = office.type === "developer";
+  const canRun = !run.isRunning && agents.length > 0 && !isDevOffice;
+
   const handleRun = () => {
     if (run.isRunning) {
       stopRun();
@@ -155,10 +158,19 @@ export function AgentRoster() {
         )}
       </div>
 
+      {isDevOffice && (
+        <div className="panel px-3 py-2 text-[11px] text-[var(--color-text-dim)] text-center leading-snug">
+          Developer workflows coming soon.
+          <br />
+          Switch to Research Office to run.
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button
           onClick={handleRun}
           className="btn-neon flex-1 justify-center"
+          disabled={!run.isRunning && !canRun}
           style={
             run.isRunning
               ? {
@@ -169,7 +181,15 @@ export function AgentRoster() {
                 }
               : undefined
           }
-          title={run.isRunning ? "Stop current run" : "Open chat to send a query"}
+          title={
+            run.isRunning
+              ? "Stop current run"
+              : agents.length === 0
+                ? "Add agents to your office first"
+                : isDevOffice
+                  ? "Developer office not yet supported"
+                  : "Open chat to send a query"
+          }
         >
           {run.isRunning ? (
             <>
@@ -214,17 +234,23 @@ export function AgentRoster() {
                 key={a.id}
                 onClick={() => selectAgent(isSelected ? null : a.id)}
                 className={clsx(
-                  "panel flex items-center gap-2 px-3 py-2 group cursor-pointer transition",
+                  "panel flex items-center gap-2 px-2.5 py-2 group cursor-pointer transition",
                   isSelected &&
                     "border-[color-mix(in_oklab,var(--color-neon-violet)_60%,transparent)]",
                   isActive &&
                     "shadow-[0_0_18px_color-mix(in_oklab,var(--color-neon-cyan)_55%,transparent)]",
                 )}
               >
-                <span
-                  className="status-dot shrink-0"
-                  style={{ background: role.color, color: role.color }}
-                />
+                <div
+                  className="shrink-0 w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold leading-none"
+                  style={{
+                    background: `color-mix(in oklab, ${role.color} 18%, transparent)`,
+                    color: role.color,
+                    border: `1px solid color-mix(in oklab, ${role.color} 40%, transparent)`,
+                  }}
+                >
+                  {i + 1}
+                </div>
                 <div className="flex-1 min-w-0">
                   {editingId === a.id ? (
                     <input
@@ -240,12 +266,7 @@ export function AgentRoster() {
                       className="w-full bg-[var(--color-bg-0)] border border-[var(--color-stroke)] rounded px-1.5 py-0.5 text-sm focus:outline-none focus:border-[var(--color-neon-violet)]"
                     />
                   ) : (
-                    <div className="text-sm font-medium truncate">
-                      {a.name}{" "}
-                      <span className="text-[var(--color-text-dim)] text-xs">
-                        #{i + 1}
-                      </span>
-                    </div>
+                    <div className="text-sm font-medium truncate">{a.name}</div>
                   )}
                   <div className="text-[10px] text-[var(--color-text-dim)] truncate">
                     {role.name} · {role.description}
