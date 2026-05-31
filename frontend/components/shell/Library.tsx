@@ -56,20 +56,7 @@ export function Library() {
     if (doc.pdf_url) {
       window.open(doc.pdf_url, "_blank");
     } else {
-      try {
-        const response = await fetch(`http://localhost:8000/api/export/pdf/${doc.id}`);
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `research_${doc.id}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } catch (error) {
-        console.error("Error downloading PDF:", error);
-      }
+      console.warn("No PDF URL available for this document");
     }
   };
 
@@ -154,9 +141,9 @@ function DocumentCard({ doc, onDownload, formatDate, formatTime }: DocumentCardP
         <button
           onClick={onDownload}
           className="flex-none p-1.5 rounded hover:bg-[var(--color-bg-3)] text-[var(--color-text-muted)] hover:text-[var(--color-neon-violet)] transition"
-          title={doc.pdf_url ? "Open PDF" : "Download PDF"}
+          title="View PDF"
         >
-          {doc.pdf_url ? <ExternalLink size={16} /> : <Download size={16} />}
+          <ExternalLink size={16} />
         </button>
       </div>
 
