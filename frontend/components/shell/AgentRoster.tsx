@@ -55,6 +55,7 @@ export function AgentRoster() {
 
   const handleAdd = (roleId: RoleId) => {
     addAgent(roleId);
+    setPickerOpen(false);
   };
 
   const beginEdit = (id: string, current: string) => {
