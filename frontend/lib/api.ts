@@ -24,9 +24,15 @@ export interface OrchestrationResult {
   goal: string;
   plan: Plan;
   success: boolean;
-  outputs: Record<string, AgentResult>;  // keys are step numbers as strings ("1", "2", …)
+  outputs: Record<string, AgentResult>;
   final_output: string;
   log: string[];
+}
+
+export interface RunResult extends OrchestrationResult {
+  research_id?: number | null;
+  office_type?: "research" | "developer";
+  artifact_url?: string | null;
 }
 
 export interface HealthResponse {
@@ -89,8 +95,8 @@ export function getPlan(payload: RunPayload): Promise<Plan> {
   });
 }
 
-export function runQuery(payload: RunPayload): Promise<OrchestrationResult> {
-  return http<OrchestrationResult>("/api/run", {
+export function runQuery(payload: RunPayload): Promise<RunResult> {
+  return http<RunResult>("/api/run", {
     method: "POST",
     body: JSON.stringify(payload),
   });

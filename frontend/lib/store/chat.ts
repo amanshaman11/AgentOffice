@@ -2,7 +2,17 @@
 
 import { create } from "zustand";
 import { runQueryAndAnimate } from "@/lib/runner";
-import { suggestWorkflow as apiSuggest, type RunPayload } from "@/lib/api";
+import {
+  suggestWorkflow as apiSuggest,
+  type RunPayload,
+  type RunResult,
+} from "@/lib/api";
+import {
+  buildDeveloperRunMeta,
+  formatDeveloperResultForChat,
+  formatResearchResultForChat,
+  type DeveloperRunMeta,
+} from "@/lib/formatDeveloperResult";
 import { useAgentStore } from "@/lib/store/agents";
 
 export type ChatRole = "user" | "assistant" | "system";
@@ -13,6 +23,7 @@ export interface ChatMessage {
   text: string;
   ts: number;
   suggestedAgents?: string[];
+  developerMeta?: DeveloperRunMeta;
 }
 
 interface ChatStore {
@@ -44,7 +55,13 @@ export const useChatStore = create<ChatStore>((set) => ({
     };
     set((s) => ({ messages: [...s.messages, user], pending: true }));
 
-    const result = await runQueryAndAnimate(trimmed);
+    const agentStore = useAgentStore.getState();
+    const activeOffice = agentStore.offices.find(
+      (o) => o.id === agentStore.activeOfficeId,
+    );
+    const officeType = (activeOffice?.type ?? "research") as RunPayload["office_type"];
+
+    const result: RunResult | null = await runQueryAndAnimate(trimmed);
 
     if (!result) {
       const sys: ChatMessage = {
@@ -57,14 +74,26 @@ export const useChatStore = create<ChatStore>((set) => ({
       return;
     }
 
-    const body =
-      result.final_output ||
-      "Run completed but no final output was produced.";
+    let body: string;
+    let developerMeta: DeveloperRunMeta | undefined;
+
+    if (officeType === "developer") {
+      developerMeta = buildDeveloperRunMeta(
+        result,
+        result.research_id,
+        result.artifact_url,
+      );
+      body = formatDeveloperResultForChat(result, developerMeta);
+    } else {
+      body = formatResearchResultForChat(result);
+    }
+
     const assistant: ChatMessage = {
       id: makeId(),
       role: "assistant",
       text: body,
       ts: Date.now(),
+      developerMeta,
     };
     set((s) => ({ messages: [...s.messages, assistant], pending: false }));
   },

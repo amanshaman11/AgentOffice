@@ -11,8 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from .agents import Orchestrator, Planner
+from .agents import Orchestrator, make_planner
 from .agents.orchestrator import OrchestrationResult
+from .project_packager import extract_executor_files
 from .agents.planner import WorkflowSuggestion, plan_from_roster, suggest_workflow
 from .agents.schemas import Plan
 from .agents.streaming_orchestrator import StreamingOrchestrator
@@ -23,12 +24,16 @@ from .database import (
     save_agent_metric,
     save_research,
     search_similar_research,
+    update_research_artifact_url,
 )
 from .metrics import MetricsSummary, get_metrics
 from .pdf_generator import generate_research_pdf
+from .project_packager import build_project_zip, extract_executor_files
 from .research_history import ResearchHistory
-from .supabase_client import is_supabase_configured, upload_pdf
+from .supabase_client import is_supabase_configured, upload_pdf, upload_project_zip
 from .websocket_manager import manager
+
+_SUPPORTED_OFFICES = {"research", "developer"}
 
 load_dotenv()
 
@@ -61,6 +66,12 @@ class SuggestRequest(BaseModel):
     office_type: str = Field(default="research")
 
 
+class RunResult(OrchestrationResult):
+    research_id: int | None = None
+    office_type: str = "research"
+    artifact_url: str | None = None
+
+
 def _clean(query: str) -> str:
     cleaned = query.strip()
     if not cleaned:
@@ -68,24 +79,74 @@ def _clean(query: str) -> str:
     return cleaned
 
 
-def _require_research(office_type: str) -> None:
-    if office_type != "research":
+def _require_supported_office(office_type: str) -> None:
+    if office_type not in _SUPPORTED_OFFICES:
+        supported = ", ".join(sorted(_SUPPORTED_OFFICES))
         raise HTTPException(
             status_code=400,
-            detail=f"Office type '{office_type}' is not supported yet. Only 'research' is available.",
+            detail=f"Office type '{office_type}' is not supported. Available: {supported}.",
         )
 
 
 def _resolve_plan(req: RunRequest, query: str) -> Plan:
     if req.agents:
         try:
-            return plan_from_roster(query, req.agents)
+            return plan_from_roster(query, req.agents, req.office_type)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return Planner().create_plan(query)
+    return make_planner(req.office_type).create_plan(query)
 
 
-async def _persist_result(query: str, result: OrchestrationResult, execution_time_ms: int) -> int | None:
+async def _generate_and_upload_artifact(
+    office_type: str,
+    query: str,
+    result: OrchestrationResult,
+    identifier: int | str,
+) -> str | None:
+    """Build the office's artifact (PDF or project zip) and upload it to Supabase."""
+
+    if not (result.success and is_supabase_configured()):
+        return None
+    try:
+        if office_type == "developer":
+            files = next(
+                (
+                    extract_executor_files(o.output)
+                    for o in result.outputs.values()
+                    if o.agent == "executor" and o.output
+                ),
+                [],
+            )
+            if not files:
+                return None
+            file_path = f"projects/{identifier}_{int(time.time())}.zip"
+            url = await upload_project_zip(file_path, build_project_zip(files))
+        else:
+            pdf_data = generate_research_pdf(
+                query=query,
+                goal=result.goal,
+                final_output=result.final_output,
+                created_at=None,
+            )
+            file_path = f"research/{identifier}_{int(time.time())}.pdf"
+            url = await upload_pdf(file_path, pdf_data)
+
+        if url:
+            print(f"Artifact uploaded to Supabase: {url}")
+        else:
+            print("Artifact upload skipped (storage bucket unavailable or empty)")
+        return url
+    except Exception as error:
+        print(f"Warning: Failed to generate/upload artifact: {error}")
+        return None
+
+
+async def _persist_result(
+    query: str,
+    result: OrchestrationResult,
+    execution_time_ms: int,
+    office_type: str = "research",
+) -> int | None:
     agent_results = {
         agent: output.success
         for agent, output in result.outputs.items()
@@ -100,8 +161,7 @@ async def _persist_result(query: str, result: OrchestrationResult, execution_tim
     )
 
     research_id = None
-    pdf_url = None
-    
+
     try:
         research_id = save_research(
             query=query,
@@ -112,35 +172,24 @@ async def _persist_result(query: str, result: OrchestrationResult, execution_tim
             outputs={k: v.model_dump() for k, v in result.outputs.items()},
             log=result.log,
             execution_time_ms=execution_time_ms,
+            office_type=office_type,
         )
 
-        if result.success and is_supabase_configured() and research_id:
-            try:
-                pdf_data = generate_research_pdf(
+        if result.success and research_id:
+            artifact_url = await _generate_and_upload_artifact(
+                office_type, query, result, research_id
+            )
+            if artifact_url:
+                update_research_artifact_url(research_id, artifact_url)
+            if is_supabase_configured():
+                await _history.save_research(
                     query=query,
                     goal=result.goal,
+                    success=result.success,
                     final_output=result.final_output,
-                    created_at=None,
+                    execution_time_ms=execution_time_ms,
+                    pdf_url=artifact_url,
                 )
-                
-                import time
-                file_path = f"research/{research_id}_{int(time.time())}.pdf"
-                pdf_url = await upload_pdf(file_path, pdf_data)
-                if pdf_url:
-                    print(f"PDF uploaded to Supabase: {pdf_url}")
-                else:
-                    print("PDF upload skipped (storage bucket unavailable or empty)")
-            except Exception as pdf_error:
-                print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
-            
-            await _history.save_research(
-                query=query,
-                goal=result.goal,
-                success=result.success,
-                final_output=result.final_output,
-                execution_time_ms=execution_time_ms,
-                pdf_url=pdf_url,
-            )
     except Exception as error:
         print(f"Warning: Failed to save research: {error}")
 
@@ -160,42 +209,62 @@ def health() -> dict:
 
 @app.post("/api/plan", response_model=Plan)
 def create_plan(req: RunRequest) -> Plan:
-    _require_research(req.office_type)
+    _require_supported_office(req.office_type)
     return _resolve_plan(req, _clean(req.query))
 
 
-@app.post("/api/run", response_model=OrchestrationResult)
-async def run(req: RunRequest) -> OrchestrationResult:
-    _require_research(req.office_type)
+@app.post("/api/run", response_model=RunResult)
+async def run(req: RunRequest) -> RunResult:
+    _require_supported_office(req.office_type)
     query = _clean(req.query)
 
-    if req.use_cache and is_supabase_configured():
+    if req.use_cache and req.office_type == "research" and is_supabase_configured():
         cached = await _history.find_cached_result(query)
         if cached:
-            return OrchestrationResult(
+            return RunResult(
                 goal=cached.goal,
                 plan=Plan(goal=cached.goal, steps=[], fallback_rules=[]),
                 success=cached.success,
                 outputs={},
                 final_output=cached.final_output,
                 log=["Retrieved from cache."],
+                office_type=req.office_type,
             )
 
     start_time = time.time()
     plan = _resolve_plan(req, query) if req.agents else None
-    result = Orchestrator().run(query, plan=plan) if plan else Orchestrator().run(query)
+    orchestrator = Orchestrator(office_type=req.office_type)
+    result = orchestrator.run(query, plan=plan) if plan else orchestrator.run(query)
     execution_time_ms = int((time.time() - start_time) * 1000)
 
-    await _persist_result(query, result, execution_time_ms)
-    return result
+    research_id = await _persist_result(
+        query, result, execution_time_ms, office_type=req.office_type
+    )
+    artifact_url = None
+    if research_id:
+        row = get_research_by_id(research_id)
+        if row:
+            artifact_url = row.get("artifact_url")
+
+    return RunResult(
+        goal=result.goal,
+        plan=result.plan,
+        success=result.success,
+        outputs=result.outputs,
+        final_output=result.final_output,
+        log=result.log,
+        research_id=research_id,
+        office_type=req.office_type,
+        artifact_url=artifact_url,
+    )
 
 
 @app.post("/api/suggest-workflow", response_model=WorkflowSuggestion)
 def suggest_workflow_endpoint(req: SuggestRequest) -> WorkflowSuggestion:
-    _require_research(req.office_type)
+    _require_supported_office(req.office_type)
     query = _clean(req.query)
     try:
-        return suggest_workflow(query)
+        return suggest_workflow(query, req.office_type)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -206,13 +275,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     try:
         data = await websocket.receive_json()
         query = data.get("query", "").strip()
+        office_type = data.get("office_type", "research")
+        if office_type not in _SUPPORTED_OFFICES:
+            office_type = "research"
 
         if not query:
             await manager.send_error(session_id, "Query must not be empty")
             return
 
         start_time = time.time()
-        orchestrator = StreamingOrchestrator()
+        roster = data.get("agents") or []
+        plan = (
+            plan_from_roster(query, roster, office_type) if roster else None
+        )
+        orchestrator = StreamingOrchestrator(office_type=office_type)
 
         async def on_progress(step: int, total: int, agent: str, status: str, message: str):
             await manager.send_progress(session_id, step, total, agent, status, message)
@@ -222,6 +298,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
 
         result, agent_metrics = await orchestrator.run_with_streaming(
             query,
+            plan=plan,
             on_progress=on_progress,
             on_agent_complete=on_agent_complete,
         )
@@ -229,7 +306,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         execution_time_ms = int((time.time() - start_time) * 1000)
 
         research_id = None
-        pdf_url = None
         try:
             research_id = save_research(
                 query=query,
@@ -240,37 +316,27 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                 outputs={k: v.model_dump() for k, v in result.outputs.items()},
                 log=result.log,
                 execution_time_ms=execution_time_ms,
+                office_type=office_type,
             )
 
             for metric in agent_metrics:
                 save_agent_metric(research_id=research_id, **metric)
 
-            if result.success and is_supabase_configured() and research_id:
-                try:
-                    pdf_data = generate_research_pdf(
+            if result.success and research_id:
+                artifact_url = await _generate_and_upload_artifact(
+                    office_type, query, result, research_id
+                )
+                if artifact_url:
+                    update_research_artifact_url(research_id, artifact_url)
+                if is_supabase_configured():
+                    await _history.save_research(
                         query=query,
                         goal=result.goal,
+                        success=result.success,
                         final_output=result.final_output,
-                        created_at=None,
+                        execution_time_ms=execution_time_ms,
+                        pdf_url=artifact_url,
                     )
-                    
-                    file_path = f"research/{research_id}_{int(time.time())}.pdf"
-                    pdf_url = await upload_pdf(file_path, pdf_data)
-                    if pdf_url:
-                        print(f"PDF uploaded to Supabase: {pdf_url}")
-                    else:
-                        print("PDF upload skipped (storage bucket unavailable or empty)")
-                except Exception as pdf_error:
-                    print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
-                
-                await _history.save_research(
-                    query=query,
-                    goal=result.goal,
-                    success=result.success,
-                    final_output=result.final_output,
-                    execution_time_ms=execution_time_ms,
-                    pdf_url=pdf_url,
-                )
         except Exception as error:
             print(f"Warning: Failed to save research: {error}")
 
@@ -333,11 +399,79 @@ def get_agent_metrics() -> dict:
         raise HTTPException(status_code=500, detail=str(error))
 
 
+@app.get("/api/export/zip/{research_id}")
+async def export_zip(research_id: int) -> Response:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    files = []
+    for output in research.get("outputs", {}).values():
+        if isinstance(output, dict) and output.get("agent") == "executor":
+            files = extract_executor_files(output.get("output") or "")
+            if files:
+                break
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No generated files found for this run")
+
+    zip_data = build_project_zip(files)
+    return Response(
+        content=zip_data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=project_{research_id}.zip",
+        },
+    )
+
+
+@app.get("/api/projects/{research_id}")
+def get_project(research_id: int) -> dict:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    files = []
+    setup_instructions = ""
+    for output in research.get("outputs", {}).values():
+        if not isinstance(output, dict) or output.get("agent") != "executor":
+            continue
+        raw = output.get("output") or ""
+        extracted = extract_executor_files(raw)
+        if extracted:
+            files = [{"path": f.path, "language": f.language} for f in extracted]
+        try:
+            from .agents.developer.schemas import ExecutorOutput
+
+            parsed = ExecutorOutput.model_validate_json(raw)
+            setup_instructions = parsed.setup_instructions
+        except Exception:
+            pass
+        break
+
+    return {
+        "success": True,
+        "research_id": research_id,
+        "query": research["query"],
+        "goal": research["goal"],
+        "office_type": research.get("office_type", "research"),
+        "artifact_url": research.get("artifact_url"),
+        "files": files,
+        "setup_instructions": setup_instructions,
+    }
+
+
 @app.get("/api/export/pdf/{research_id}")
 async def export_pdf(research_id: int) -> Response:
     research = get_research_by_id(research_id)
     if not research:
         raise HTTPException(status_code=404, detail="Research not found")
+
+    if research.get("office_type") == "developer":
+        raise HTTPException(
+            status_code=400,
+            detail="Developer projects use /api/export/zip/{id}, not PDF export.",
+        )
 
     try:
         pdf_data = generate_research_pdf(

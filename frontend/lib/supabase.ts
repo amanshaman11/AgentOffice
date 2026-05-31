@@ -19,6 +19,7 @@ export interface ResearchDocument {
   created_at: string;
   expires_at: string | null;
   pdf_url: string | null;
+  office_type?: string;
   source?: "cloud" | "local";
 }
 
@@ -30,6 +31,8 @@ interface LocalHistoryRecord {
   final_output: string;
   created_at: string;
   execution_time_ms: number;
+  office_type?: string;
+  artifact_url?: string | null;
 }
 
 function mapLocalRecord(record: LocalHistoryRecord): ResearchDocument {
@@ -43,7 +46,8 @@ function mapLocalRecord(record: LocalHistoryRecord): ResearchDocument {
     execution_time_ms: record.execution_time_ms ?? 0,
     created_at: record.created_at,
     expires_at: null,
-    pdf_url: null,
+    pdf_url: record.artifact_url ?? null,
+    office_type: record.office_type ?? "research",
     source: "local",
   };
 }
@@ -151,14 +155,36 @@ export async function searchDocuments(query: string): Promise<ResearchDocument[]
   return searchLocalDocuments(query);
 }
 
-export function getDocumentPdfUrl(doc: ResearchDocument): string | null {
+export type ArtifactKind = "pdf" | "zip";
+
+export function getDocumentArtifact(
+  doc: ResearchDocument,
+): { url: string | null; kind: ArtifactKind } {
+  const office = doc.office_type ?? "research";
+
   if (doc.pdf_url) {
-    return doc.pdf_url;
+    return {
+      url: doc.pdf_url,
+      kind: office === "developer" ? "zip" : "pdf",
+    };
   }
 
   if (/^\d+$/.test(doc.id)) {
-    return `${BACKEND_URL}/api/export/pdf/${doc.id}`;
+    if (office === "developer") {
+      return {
+        url: `${BACKEND_URL}/api/export/zip/${doc.id}`,
+        kind: "zip",
+      };
+    }
+    return {
+      url: `${BACKEND_URL}/api/export/pdf/${doc.id}`,
+      kind: "pdf",
+    };
   }
 
-  return null;
+  return { url: null, kind: office === "developer" ? "zip" : "pdf" };
+}
+
+export function getDocumentPdfUrl(doc: ResearchDocument): string | null {
+  return getDocumentArtifact(doc).url;
 }

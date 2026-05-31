@@ -33,7 +33,12 @@ CREATE POLICY "Allow all operations" ON research_history
   USING (true)
   WITH CHECK (true);
 
--- Create storage bucket for PDFs (run this separately in Supabase dashboard or via client)
+-- Create storage buckets (run these separately in Supabase dashboard or via client)
 -- Go to: Storage > Create Bucket
--- Name: research-pdfs
--- Public: Yes
+-- Research Office PDFs:
+--   Name: research-pdfs
+--   Public: Yes
+-- Developer Office project zips:
+--   Name: developer-projects
+--   Public: Yes
+-- Note: the developer project zip URL is stored in the existing pdf_url column for MVP.

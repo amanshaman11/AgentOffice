@@ -9,12 +9,44 @@ from typing import Callable
 from pydantic import BaseModel
 
 from .base import BaseAgent
+from .developer import build_developer_agents
 from .filter import build_step_context, get_next_step, should_retry, validate_step
-from .planner import Planner
+from .planner import Planner, default_developer_plan
 from .research import build_research_agents
 from .schemas import AgentResult, Plan, PlanStep
 
 _SKIPPED_MARKER = "[skipped: optional step]"
+
+_TERMINAL_PREFERENCE = {
+    "research": ("sender", "summarizer"),
+    "developer": ("executor", "deployer", "marketing", "qa"),
+}
+
+
+class _DefaultDeveloperPlanner:
+    """Minimal planner providing the deterministic developer plan when no roster is set."""
+
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = model
+
+    def create_plan(self, query: str) -> Plan:
+        return default_developer_plan(query)
+
+
+def make_planner(office_type: str = "research", *, model: str | None = None):
+    """Return the plan provider for ``office_type``."""
+
+    if office_type == "developer":
+        return _DefaultDeveloperPlanner(model=model)
+    return Planner(model=model)
+
+
+def build_agents(office_type: str = "research", *, model: str | None = None) -> dict[str, BaseAgent]:
+    """Return the agent registry for ``office_type``."""
+
+    if office_type == "developer":
+        return build_developer_agents(model=model)
+    return build_research_agents(model=model)
 
 
 class OrchestrationResult(BaseModel):
@@ -58,13 +90,15 @@ class Orchestrator:
     def __init__(
         self,
         *,
-        planner: Planner | None = None,
+        planner=None,
         agents: dict[str, BaseAgent] | None = None,
         model: str | None = None,
+        office_type: str = "research",
         approve: Callable[[Plan], bool] | None = None,
     ) -> None:
-        self.planner = planner or Planner(model=model)
-        self.agents = agents or build_research_agents(model=model)
+        self.office_type = office_type
+        self.planner = planner or make_planner(office_type, model=model)
+        self.agents = agents or build_agents(office_type, model=model)
         self.approve = approve or (lambda _plan: True)
 
     def run(self, query: str, *, plan: Plan | None = None) -> OrchestrationResult:
@@ -153,8 +187,8 @@ class Orchestrator:
         )
         return self._finalize(plan, outputs, log, success=success)
 
-    @staticmethod
     def _finalize(
+        self,
         plan: Plan,
         outputs: dict[int, AgentResult],
         log: list[str],
@@ -162,7 +196,7 @@ class Orchestrator:
         success: bool,
     ) -> OrchestrationResult:
         final_output = ""
-        for role in ("sender", "summarizer"):
+        for role in _TERMINAL_PREFERENCE.get(self.office_type, ("sender", "summarizer")):
             for step in reversed(plan.steps):
                 if step.agent == role:
                     r = outputs.get(step.step)
