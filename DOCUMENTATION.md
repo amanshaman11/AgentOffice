@@ -280,3 +280,113 @@ frontend/
 **Deploy tab blocked:** The deploy button opens a tab synchronously on click, then navigates it after the API responds.
 
 **Developer QA loops:** Check activity log for static validation errors; Executor retries with precise feedback.
+
+## Docker Deployment (VPS)
+
+Production setup uses three containers: **backend** (FastAPI), **frontend** (Next.js), and **nginx** (reverse proxy on port 80).
+
+```
+Browser → nginx:80
+            ├── /api/*, /ws/* → backend:8000
+            └── /*            → frontend:3000
+```
+
+SQLite data persists in a Docker volume (`agentoffice-data`).
+
+### VPS requirements
+
+- Ubuntu 22.04+ (or any Linux with Docker)
+- 2 GB RAM recommended (1 GB minimum)
+- Ports 80 (and 443 if adding SSL) open in firewall
+
+### 1. Install Docker on the VPS
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### 2. Clone and configure
+
+```bash
+git clone https://github.com/your-username/AgentOffice.git
+cd AgentOffice
+cp .env.example .env
+nano .env
+```
+
+Set at minimum:
+
+```env
+GEMINI_API_KEY=your_key
+OPENAI_API_KEY=your_key
+PUBLIC_URL=http://YOUR_VPS_IP
+```
+
+`PUBLIC_URL` must match how users reach the app (no trailing slash). It is baked into the frontend at build time and used for backend CORS.
+
+Optional: `SUPABASE_URL`, `SUPABASE_KEY`, `VERCEL_API_TOKEN`.
+
+### 3. Build and start
+
+```bash
+docker compose up -d --build
+```
+
+Check status:
+
+```bash
+docker compose ps
+docker compose logs -f
+curl http://YOUR_VPS_IP/api/health
+```
+
+Open `http://YOUR_VPS_IP` in a browser.
+
+### 4. Update after code changes
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+If you change `PUBLIC_URL`, rebuild the frontend:
+
+```bash
+docker compose up -d --build frontend
+```
+
+### 5. Add HTTPS (recommended)
+
+Point a domain A record to your VPS IP, then install Certbot on the host:
+
+```bash
+sudo apt install certbot
+sudo certbot certonly --standalone -d agentoffice.example.com
+```
+
+Update `PUBLIC_URL=https://agentoffice.example.com` in `.env`, rebuild, then either:
+
+- Terminate SSL on the host nginx and proxy to `localhost:80`, or
+- Mount certs into the nginx container and extend `docker/nginx.conf` with a `:443` server block.
+
+After switching to HTTPS, rebuild frontend so `NEXT_PUBLIC_BACKEND_URL` uses `https://`.
+
+### Useful commands
+
+```bash
+docker compose logs backend -f    # backend logs
+docker compose restart backend  # restart API only
+docker compose down             # stop all containers
+docker compose down -v          # stop and delete SQLite volume (data loss)
+```
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile.backend` | Python FastAPI image |
+| `frontend/Dockerfile` | Next.js standalone image |
+| `docker-compose.yml` | Orchestrates all services |
+| `docker/nginx.conf` | Routes `/api` and `/ws` to backend |

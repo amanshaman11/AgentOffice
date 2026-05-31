@@ -110,7 +110,16 @@ Instead of talking to one assistant, users manage an entire AI workforce.
 
 ## Getting Started
 
-See [DOCUMENTATION.md](DOCUMENTATION.md) for full API reference, Supabase setup, library flow, and Vercel deploy.
+See [DOCUMENTATION.md](DOCUMENTATION.md) for full API reference, Supabase setup, library flow, Vercel deploy, and **Docker VPS deployment**.
+
+### Docker (production on VPS)
+
+```bash
+cp .env.example .env   # set GEMINI_API_KEY, OPENAI_API_KEY, PUBLIC_URL
+docker compose up -d --build
+```
+
+See [DOCUMENTATION.md — Docker Deployment](DOCUMENTATION.md#docker-deployment-vps) for full VPS setup including HTTPS.
 
 ### Prerequisites
 
