@@ -10,7 +10,6 @@ import uuid
 from datetime import datetime
 
 from dotenv import load_dotenv
-from email_validator import EmailNotValidError, validate_email
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -28,7 +27,6 @@ from .database import (
     save_research,
     search_similar_research,
 )
-from .email_service import is_email_configured, send_research_email
 from .metrics import MetricsSummary, get_metrics
 from .pdf_generator import generate_research_pdf
 from .research_history import ResearchHistory
@@ -56,11 +54,6 @@ class RunRequest(BaseModel):
     use_cache: bool = Field(default=True, description="Use cached results if available")
 
 
-class ExportEmailRequest(BaseModel):
-    research_id: int = Field(..., description="ID of research to export")
-    email: str = Field(..., description="Email address to send report to")
-
-
 def _clean(query: str) -> str:
     cleaned = query.strip()
     if not cleaned:
@@ -75,7 +68,6 @@ def health() -> dict:
         "version": "2.0.0",
         "gemini_key": "set" if os.getenv("GEMINI_API_KEY") else "missing",
         "supabase": "configured" if is_supabase_configured() else "not_configured",
-        "email": "configured" if is_email_configured() else "not_configured",
         "uptime_seconds": _metrics.get_uptime_seconds(),
     }
 
@@ -272,10 +264,11 @@ async def export_pdf(research_id: int) -> Response:
             created_at=research.get("created_at"),
         )
         
+        pdf_url = None
         if is_supabase_configured():
             try:
                 file_path = f"research/{research_id}_{int(time.time())}.pdf"
-                await upload_pdf(file_path, pdf_data)
+                pdf_url = await upload_pdf(file_path, pdf_data)
             except Exception as error:
                 print(f"Warning: Failed to upload PDF to Supabase: {error}")
         
@@ -283,81 +276,9 @@ async def export_pdf(research_id: int) -> Response:
             content=pdf_data,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename=research_{research_id}.pdf"
+                "Content-Disposition": f"attachment; filename=research_{research_id}.pdf",
+                "X-PDF-URL": pdf_url if pdf_url else "",
             },
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {error}")
-
-
-@app.post("/api/export/email")
-async def export_email(req: ExportEmailRequest) -> dict:
-    if not is_email_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Email service not configured. Set SMTP environment variables.",
-        )
-    
-    try:
-        email_info = validate_email(req.email, check_deliverability=False)
-        recipient_email = email_info.normalized
-    except EmailNotValidError as error:
-        raise HTTPException(status_code=400, detail=f"Invalid email: {error}")
-    
-    research = get_research_by_id(req.research_id)
-    if not research:
-        raise HTTPException(status_code=404, detail="Research not found")
-    
-    try:
-        pdf_data = generate_research_pdf(
-            query=research["query"],
-            goal=research["goal"],
-            final_output=research["final_output"],
-            created_at=research.get("created_at"),
-        )
-        
-        pdf_url = None
-        if is_supabase_configured():
-            try:
-                file_path = f"research/{req.research_id}_{int(time.time())}.pdf"
-                pdf_url = await upload_pdf(file_path, pdf_data)
-            except Exception as error:
-                print(f"Warning: Failed to upload PDF to Supabase: {error}")
-        
-        subject = f"Research Report: {research['query'][:50]}"
-        body = f"""Hello,
-
-Please find attached your research report from AgentOffice.
-
-Research Query: {research['query']}
-Research Goal: {research['goal']}
-Generated: {datetime.fromisoformat(research['created_at']).strftime('%B %d, %Y at %I:%M %p UTC')}
-
-"""
-        
-        if pdf_url:
-            body += f"You can also view your report online at: {pdf_url}\n\n"
-        
-        body += """Best regards,
-AgentOffice Team
-
----
-This is an automated email from AgentOffice Research System.
-"""
-        
-        await send_research_email(
-            to_email=recipient_email,
-            subject=subject,
-            body=body,
-            pdf_data=pdf_data,
-            pdf_filename=f"research_{req.research_id}.pdf",
-        )
-        
-        return {
-            "success": True,
-            "message": f"Research report sent to {recipient_email}",
-            "pdf_url": pdf_url,
-        }
-    
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {error}")
