@@ -100,6 +100,8 @@ async def _persist_result(query: str, result: OrchestrationResult, execution_tim
     )
 
     research_id = None
+    pdf_url = None
+    
     try:
         research_id = save_research(
             query=query,
@@ -112,13 +114,29 @@ async def _persist_result(query: str, result: OrchestrationResult, execution_tim
             execution_time_ms=execution_time_ms,
         )
 
-        if result.success and is_supabase_configured():
+        if result.success and is_supabase_configured() and research_id:
+            try:
+                pdf_data = generate_research_pdf(
+                    query=query,
+                    goal=result.goal,
+                    final_output=result.final_output,
+                    created_at=None,
+                )
+                
+                import time
+                file_path = f"research/{research_id}_{int(time.time())}.pdf"
+                pdf_url = await upload_pdf(file_path, pdf_data)
+                print(f"PDF uploaded to Supabase: {pdf_url}")
+            except Exception as pdf_error:
+                print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
+            
             await _history.save_research(
                 query=query,
                 goal=result.goal,
                 success=result.success,
                 final_output=result.final_output,
                 execution_time_ms=execution_time_ms,
+                pdf_url=pdf_url,
             )
     except Exception as error:
         print(f"Warning: Failed to save research: {error}")
@@ -208,6 +226,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         execution_time_ms = int((time.time() - start_time) * 1000)
 
         research_id = None
+        pdf_url = None
         try:
             research_id = save_research(
                 query=query,
@@ -223,13 +242,28 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
             for metric in agent_metrics:
                 save_agent_metric(research_id=research_id, **metric)
 
-            if result.success and is_supabase_configured():
+            if result.success and is_supabase_configured() and research_id:
+                try:
+                    pdf_data = generate_research_pdf(
+                        query=query,
+                        goal=result.goal,
+                        final_output=result.final_output,
+                        created_at=None,
+                    )
+                    
+                    file_path = f"research/{research_id}_{int(time.time())}.pdf"
+                    pdf_url = await upload_pdf(file_path, pdf_data)
+                    print(f"PDF uploaded to Supabase: {pdf_url}")
+                except Exception as pdf_error:
+                    print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
+                
                 await _history.save_research(
                     query=query,
                     goal=result.goal,
                     success=result.success,
                     final_output=result.final_output,
                     execution_time_ms=execution_time_ms,
+                    pdf_url=pdf_url,
                 )
         except Exception as error:
             print(f"Warning: Failed to save research: {error}")
