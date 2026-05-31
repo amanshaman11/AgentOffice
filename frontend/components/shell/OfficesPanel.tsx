@@ -39,7 +39,7 @@ export function OfficesPanel() {
   };
 
   return (
-    <aside className="w-64 shrink-0 p-3 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-y-auto">
+    <aside className="w-full h-full shrink-0 p-3 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-y-auto">
       <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
         <span className="flex items-center gap-2">
           <Building2 size={12} />

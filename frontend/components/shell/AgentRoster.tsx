@@ -42,11 +42,6 @@ export function AgentRoster() {
   const focusChat = useUiStore((s) => s.focusChat);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Show only the active office's roles by default, but let user override
-  const [officeFilter, setOfficeFilter] = useState<OfficeType>(office.type);
-  useEffect(() => {
-    setOfficeFilter(office.type);
-  }, [office.type]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -60,7 +55,6 @@ export function AgentRoster() {
 
   const handleAdd = (roleId: RoleId) => {
     addAgent(roleId);
-    setPickerOpen(false);
   };
 
   const beginEdit = (id: string, current: string) => {
@@ -72,7 +66,10 @@ export function AgentRoster() {
     setEditingId(null);
   };
 
-  const visibleRoles = ROLE_LIST.filter((r) => r.office === officeFilter);
+  const roleGroups: { label: string; office: OfficeType }[] = [
+    { label: "Research Office", office: "research" },
+    { label: "Developer Office", office: "developer" },
+  ];
 
   const isDevOffice = office.type === "developer";
   const canRun = !run.isRunning && agents.length > 0 && !isDevOffice;
@@ -86,7 +83,7 @@ export function AgentRoster() {
   };
 
   return (
-    <aside className="w-72 shrink-0 p-3 border-l border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-hidden">
+    <aside className="w-full h-full shrink-0 p-3 border-l border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col gap-3 overflow-hidden">
       <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)] px-1">
         <span className="flex items-center gap-1.5">
           <Users size={12} />
@@ -118,41 +115,38 @@ export function AgentRoster() {
 
         {pickerOpen && (
           <div className="absolute z-20 top-full mt-2 left-0 right-0 panel-raised p-2 shadow-xl">
-            <div className="flex gap-1 mb-2 p-1 bg-[var(--color-bg-0)] rounded-lg border border-[var(--color-stroke)]">
-              {(["research", "developer"] as OfficeType[]).map((o) => (
-                <button
-                  key={o}
-                  onClick={() => setOfficeFilter(o)}
-                  className={clsx(
-                    "flex-1 px-2 py-1 text-xs rounded-md capitalize transition",
-                    officeFilter === o
-                      ? "bg-[var(--color-bg-2)] text-[var(--color-text-primary)]"
-                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]",
-                  )}
-                >
-                  {o}
-                </button>
-              ))}
-            </div>
             <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
-              {visibleRoles.map((role) => (
-                <button
-                  key={role.id}
-                  onClick={() => handleAdd(role.id)}
-                  className="flex items-start gap-2 p-2 rounded-md text-left hover:bg-[var(--color-bg-2)] transition group"
-                >
-                  <span
-                    className="status-dot mt-1.5 shrink-0"
-                    style={{ background: role.color, color: role.color }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{role.name}</div>
-                    <div className="text-[11px] text-[var(--color-text-dim)] leading-snug">
-                      {role.description}
+              {roleGroups.map(({ label, office: groupOffice }) => {
+                const roles = ROLE_LIST.filter((r) => r.office === groupOffice);
+                return (
+                  <div key={groupOffice}>
+                    <div className="sticky top-0 z-10 px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)] bg-[var(--color-bg-1)] border-b border-[var(--color-stroke)]">
+                      {label}
                     </div>
+                    {roles.map((role) => (
+                      <button
+                        key={role.id}
+                        onClick={() => handleAdd(role.id)}
+                        style={{ "--role-color": role.color } as React.CSSProperties}
+                        className="group flex items-start gap-2 p-2 rounded-md text-left w-full transition-all duration-150 border border-transparent hover:cursor-pointer hover:border-[color-mix(in_oklab,var(--role-color)_45%,transparent)] hover:bg-[color-mix(in_oklab,var(--role-color)_16%,transparent)] hover:shadow-[0_0_14px_color-mix(in_oklab,var(--role-color)_35%,transparent)]"
+                      >
+                        <span
+                          className="status-dot mt-1.5 shrink-0 transition-transform duration-150 group-hover:scale-125"
+                          style={{ background: role.color, color: role.color }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium transition-colors duration-150 group-hover:text-[var(--role-color)]">
+                            {role.name}
+                          </div>
+                          <div className="text-[11px] text-[var(--color-text-dim)] leading-snug transition-colors duration-150 group-hover:text-[var(--color-text-muted)]">
+                            {role.description}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

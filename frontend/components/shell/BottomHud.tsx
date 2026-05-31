@@ -24,11 +24,7 @@ export function BottomHud() {
     <footer className="flex items-center justify-between px-5 py-3 border-t border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_70%,transparent)] backdrop-blur-md">
       <BackendStatus />
 
-      <button onClick={focusChat} className="btn-neon">
-        <MessageSquare size={14} />
-        Open Chat
-      </button>
-
+      
       <div className="text-xs font-mono text-[var(--color-text-muted)]">
         {time || "--:--"}
       </div>

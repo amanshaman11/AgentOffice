@@ -3,12 +3,9 @@
 import dynamic from "next/dynamic";
 import { TopBar } from "@/components/shell/TopBar";
 import { LeftRail } from "@/components/shell/LeftRail";
-import { OfficesPanel } from "@/components/shell/OfficesPanel";
-import { GeminiChat } from "@/components/shell/GeminiChat";
+import { LeftSidebarSlot } from "@/components/shell/LeftSidebarSlot";
+import { RightSidebarSlot } from "@/components/shell/RightSidebarSlot";
 import { BottomHud } from "@/components/shell/BottomHud";
-import { AgentRoster } from "@/components/shell/AgentRoster";
-import { RightCollapsedTab } from "@/components/shell/RightCollapsedTab";
-import { useUiStore } from "@/lib/store/ui";
 
 const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
   ssr: false,
@@ -20,18 +17,14 @@ const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
 });
 
 export default function Home() {
-  const activeLeft = useUiStore((s) => s.activeLeft);
-  const rightOpen = useUiStore((s) => s.rightOpen);
-
   return (
     <div className="h-screen flex flex-col">
       <TopBar />
       <div className="flex-1 flex min-h-0">
         <LeftRail />
-        {activeLeft === "offices" && <OfficesPanel />}
-        {activeLeft === "chat" && <GeminiChat />}
+        <LeftSidebarSlot />
 
-        <main className="flex-1 relative min-w-0">
+        <main className="flex-1 relative min-w-0 transition-[flex] duration-300 ease-in-out">
           {/* Tagline overlay */}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 text-center pointer-events-none">
             <div className="text-[10px] tracking-[0.32em] text-[var(--color-text-dim)] uppercase">
@@ -50,7 +43,7 @@ export default function Home() {
           <RoomScene />
         </main>
 
-        {rightOpen ? <AgentRoster /> : <RightCollapsedTab />}
+        <RightSidebarSlot />
       </div>
       <BottomHud />
     </div>

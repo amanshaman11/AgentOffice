@@ -73,7 +73,7 @@ export function GeminiChat() {
   const disabled = !draft.trim() || busy;
 
   return (
-    <aside className="w-80 shrink-0 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col min-h-0">
+    <aside className="w-full h-full shrink-0 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col min-h-0">
       <div className="px-3 py-2.5 border-b border-[var(--color-stroke)] flex items-center gap-2">
         <Sparkles
           size={14}
