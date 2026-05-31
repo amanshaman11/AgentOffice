@@ -1,22 +1,32 @@
-"""FastAPI bridge exposing the AgentOffice planner and orchestrator to the frontend."""
+"""FastAPI server with streaming, export, history, and metrics."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import time
+from datetime import datetime
+from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import Response
+from pydantic import BaseModel, Field, EmailStr
 
 from .agents import Orchestrator, Planner
 from .agents.orchestrator import OrchestrationResult
-from .agents.planner import WorkflowSuggestion, plan_from_roster, suggest_workflow
 from .agents.schemas import Plan
+from .email_service import send_research_email, is_email_configured
+from .metrics import get_metrics, MetricsSummary
+from .pdf_generator import generate_research_pdf
+from .research_history import ResearchHistory, ResearchRecord
+from .supabase_client import upload_pdf, is_supabase_configured
 
 load_dotenv()
 
-app = FastAPI(title="AgentOffice API", version="0.2.0")
+app = FastAPI(title="AgentOffice API", version="1.0.0")
 
 _origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
@@ -26,23 +36,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_history = ResearchHistory()
+_metrics = get_metrics()
+
 
 class RunRequest(BaseModel):
-    """User input that drives a planning or execution request."""
-
-    query: str = Field(..., min_length=1, description="Research query or SaaS idea.")
-    office_type: str = Field(default="research", description="Active office type.")
-    agents: list[str] = Field(
-        default_factory=list,
-        description="Ordered roster of agent role IDs from the frontend office.",
-    )
+    query: str = Field(..., min_length=1)
+    use_cache: bool = Field(default=True)
 
 
-class SuggestRequest(BaseModel):
-    """Input for workflow suggestions — does not execute any agents."""
+class ExportRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    email: EmailStr | None = None
+    generate_pdf: bool = Field(default=True)
 
-    query: str = Field(..., min_length=1, description="Research query.")
-    office_type: str = Field(default="research")
+
+class StreamMessage(BaseModel):
+    type: str
+    data: dict
 
 
 def _clean(query: str) -> str:
@@ -52,72 +63,218 @@ def _clean(query: str) -> str:
     return cleaned
 
 
-def _require_research(office_type: str) -> None:
-    if office_type != "research":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Office type '{office_type}' is not supported yet. Only 'research' is available.",
-        )
-
-
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    """Liveness probe and Gemini key presence check."""
-
+def health() -> dict:
     return {
         "status": "ok",
         "gemini_key": "set" if os.getenv("GEMINI_API_KEY") else "missing",
+        "supabase": "configured" if is_supabase_configured() else "not configured",
+        "email": "configured" if is_email_configured() else "not configured",
+        "uptime_seconds": _metrics.get_uptime_seconds(),
     }
 
 
 @app.post("/api/plan", response_model=Plan)
 def create_plan(req: RunRequest) -> Plan:
-    """Return the execution plan without running any agents.
-
-    If ``agents`` is provided the plan is built directly from the roster (no
-    Gemini call). Otherwise the Planner generates one from the query.
-    """
-
-    _require_research(req.office_type)
-    query = _clean(req.query)
-
-    if req.agents:
-        try:
-            return plan_from_roster(query, req.agents)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return Planner().create_plan(query)
+    return Planner().create_plan(_clean(req.query))
 
 
 @app.post("/api/run", response_model=OrchestrationResult)
-def run(req: RunRequest) -> OrchestrationResult:
-    """Plan and execute the multi-agent pipeline for a query.
-
-    If ``agents`` is provided the roster defines the workflow — each slot becomes
-    one execution step. Otherwise the Planner generates the plan automatically.
-    """
-
-    _require_research(req.office_type)
+async def run(req: RunRequest) -> OrchestrationResult:
     query = _clean(req.query)
+    
+    if req.use_cache:
+        cached = await _history.find_cached_result(query)
+        if cached:
+            return OrchestrationResult(
+                goal=cached.goal,
+                plan=Plan(goal=cached.goal, steps=[], fallback_rules=[]),
+                success=cached.success,
+                outputs={},
+                final_output=cached.final_output,
+                log=["Retrieved from cache."],
+            )
+    
+    start_time = time.time()
+    result = Orchestrator().run(query)
+    execution_time_ms = int((time.time() - start_time) * 1000)
+    
+    agent_results = {
+        agent: output.success
+        for agent, output in result.outputs.items()
+    }
+    
+    _metrics.record_execution(
+        query=query,
+        goal=result.goal,
+        success=result.success,
+        execution_time_ms=execution_time_ms,
+        agent_results=agent_results,
+    )
+    
+    if result.success:
+        await _history.save_research(
+            query=query,
+            goal=result.goal,
+            success=result.success,
+            final_output=result.final_output,
+            execution_time_ms=execution_time_ms,
+        )
+    
+    return result
 
-    if req.agents:
-        try:
-            roster_plan = plan_from_roster(query, req.agents)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return Orchestrator().run(query, plan=roster_plan)
 
-    return Orchestrator().run(query)
-
-
-@app.post("/api/suggest-workflow", response_model=WorkflowSuggestion)
-def suggest_workflow_endpoint(req: SuggestRequest) -> WorkflowSuggestion:
-    """Ask Gemini to recommend a workflow for the query. Does not run any agents."""
-
-    _require_research(req.office_type)
+@app.post("/api/export")
+async def export_research(req: ExportRequest) -> dict:
     query = _clean(req.query)
+    
+    cached = await _history.find_cached_result(query)
+    if not cached:
+        raise HTTPException(
+            status_code=404,
+            detail="No research found for this query. Please run the research first.",
+        )
+    
+    response_data = {"success": True, "pdf_url": None, "email_sent": False}
+    
+    if req.generate_pdf:
+        pdf_data = generate_research_pdf(cached.goal, cached.final_output)
+        
+        if is_supabase_configured():
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"research/{timestamp}_{cached.query_hash}.pdf"
+            
+            try:
+                pdf_url = await upload_pdf(filename, pdf_data)
+                response_data["pdf_url"] = pdf_url
+            except Exception as error:
+                print(f"PDF upload failed: {error}")
+        
+        if req.email and is_email_configured():
+            try:
+                await send_research_email(
+                    to_email=req.email,
+                    subject=f"Research Report: {cached.goal}",
+                    body=f"Your research report for '{cached.goal}' is attached.\n\nGenerated by AgentOffice.",
+                    pdf_data=pdf_data,
+                    pdf_filename=f"research_{cached.query_hash}.pdf",
+                )
+                response_data["email_sent"] = True
+            except Exception as error:
+                response_data["email_error"] = str(error)
+    
+    return response_data
+
+
+@app.get("/api/history", response_model=list[ResearchRecord])
+async def get_history(limit: int = 10) -> list[ResearchRecord]:
+    if not is_supabase_configured():
+        return []
+    
+    return await _history.get_recent_history(limit=min(limit, 50))
+
+
+@app.get("/api/metrics", response_model=MetricsSummary)
+def get_metrics_summary(hours: int | None = None) -> MetricsSummary:
+    return _metrics.get_summary(last_n_hours=hours)
+
+
+@app.get("/api/export/pdf/{query_hash}")
+async def download_pdf(query_hash: str) -> Response:
+    if not is_supabase_configured():
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    
+    records = await _history.get_recent_history(limit=100)
+    record = next((r for r in records if r.query_hash == query_hash), None)
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Research not found.")
+    
+    pdf_data = generate_research_pdf(record.goal, record.final_output)
+    
+    return Response(
+        content=pdf_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="research_{query_hash}.pdf"'
+        },
+    )
+
+
+@app.websocket("/api/stream")
+async def websocket_stream(websocket: WebSocket):
+    await websocket.accept()
+    
     try:
-        return suggest_workflow(query)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        data = await websocket.receive_text()
+        request = json.loads(data)
+        query = _clean(request.get("query", ""))
+        
+        await websocket.send_json({
+            "type": "status",
+            "data": {"message": "Planning research...", "step": 0}
+        })
+        
+        plan = Planner().create_plan(query)
+        
+        await websocket.send_json({
+            "type": "plan",
+            "data": {"goal": plan.goal, "steps": len(plan.steps)}
+        })
+        
+        await websocket.send_json({
+            "type": "status",
+            "data": {"message": "Starting agents...", "step": 0}
+        })
+        
+        start_time = time.time()
+        result = Orchestrator().run(query)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        for idx, log_entry in enumerate(result.log):
+            await websocket.send_json({
+                "type": "log",
+                "data": {"message": log_entry, "index": idx}
+            })
+            await asyncio.sleep(0.1)
+        
+        await websocket.send_json({
+            "type": "complete",
+            "data": {
+                "success": result.success,
+                "final_output": result.final_output,
+                "execution_time_ms": execution_time_ms,
+            }
+        })
+        
+        agent_results = {
+            agent: output.success
+            for agent, output in result.outputs.items()
+        }
+        
+        _metrics.record_execution(
+            query=query,
+            goal=result.goal,
+            success=result.success,
+            execution_time_ms=execution_time_ms,
+            agent_results=agent_results,
+        )
+        
+        if result.success:
+            await _history.save_research(
+                query=query,
+                goal=result.goal,
+                success=result.success,
+                final_output=result.final_output,
+                execution_time_ms=execution_time_ms,
+            )
+    
+    except WebSocketDisconnect:
+        pass
+    except Exception as error:
+        await websocket.send_json({
+            "type": "error",
+            "data": {"message": str(error)}
+        })
+    finally:
+        await websocket.close()
