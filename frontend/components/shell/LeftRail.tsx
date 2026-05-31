@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, MessageSquare } from "lucide-react";
+import { Building2, MessageSquare, Library } from "lucide-react";
 import clsx from "clsx";
 import { useUiStore, type LeftView } from "@/lib/store/ui";
 
@@ -45,6 +45,7 @@ export function LeftRail() {
   const items: { view: NonNullable<LeftView>; label: string; icon: React.ReactNode }[] = [
     { view: "offices", label: "Offices", icon: <Building2 size={18} /> },
     { view: "chat", label: "Gemini Chat", icon: <MessageSquare size={18} /> },
+    { view: "library", label: "Library", icon: <Library size={18} /> },
   ];
 
   return (
