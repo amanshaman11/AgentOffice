@@ -6,7 +6,7 @@
 
 AgentOffice is a multi-agent workspace that allows users to create AI-powered offices for different tasks without building complex workflows manually.
 
-Instead of configuring automation tools like n8n or writing code, users simply add built-in agents, and run a complete AI workflow.
+Instead of configuring automation tools like n8n or writing code, users add built-in agents to their office roster in the order they want them to run — and that roster **is** the workflow. Send a query and every agent you added executes in sequence, each building on the previous agent's output.
 
 Our vision is to make AI collaboration accessible through a visual office environment where agents communicate, validate each other's work, and deliver final results to the user.
 
@@ -26,9 +26,11 @@ This creates a high barrier for students, researchers, entrepreneurs, and non-te
 AgentOffice allows users to create an AI office instead of building workflows manually.
 
 **Simple process:**
-1. Add AI agents
-2. Run the office
-3. Receive validated results
+1. Add AI agents to your office in execution order
+2. Type a query and run the office
+3. Each agent in your roster runs in sequence, then you receive the final result
+
+Use the **Suggest workflow** (wand icon) to ask Gemini which agents to add for a given query, then hit **Apply to office** to load the recommendation into your roster in one click.
 
 Agents collaborate, review each other's work, and can intervene when errors are detected.
 
@@ -83,11 +85,12 @@ Designed for software development projects.
 ## Key Features
 
 - Visual AI office interface (3D environment)
-- Multi-agent collaboration with intervention logic
+- **Roster = workflow**: every agent you add is an execution step, in the order you arranged them
+- **AI workflow suggestion**: ask Gemini to recommend which agents to add for your query
+- Multi-agent collaboration with intervention logic (analyzer failure retries searcher)
+- Step-keyed outputs — duplicate agents (e.g. two Searchers) each have their own result
 - Local memory and data storage
 - Research automation with citation support (APA 7, MLA)
-- SaaS development automation
-- Email and Telegram export
 - Desktop-ready architecture
   
 ## Tech Stack
@@ -117,15 +120,19 @@ Instead of talking to one assistant, users manage an entire AI workforce.
 ```bash
 # Clone the repository
 git clone https://github.com/your-username/AgentOffice.git
-
-# Navigate to project folder
 cd AgentOffice
 
-# Install dependencies
-npm install
+# Set up Python backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# Create .env.local file and add your API key
-NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here
+# Add your Gemini API key
+cp .env.example .env
+# Edit .env and set GEMINI_API_KEY=your_key_here
 
-# Run the development server
+# Install frontend dependencies
+cd frontend && npm install && cd ..
+
+# Start both backend and frontend with one command
 npm run dev

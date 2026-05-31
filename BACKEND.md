@@ -1,16 +1,20 @@
 # AgentOffice Backend
 
-Multi-agent research orchestrator with plan-then-execute architecture.
+Multi-agent research orchestrator with a roster-driven, plan-then-execute architecture.
 
 ## Architecture
 
 ```
-User Query → Planner (Gemini) → Plan JSON → Orchestrator → Filter → Agents
-                                                ↓
-                        Validation + Re-routing + Retry Logic
-                                                ↓
-                                    OrchestrationResult
+Frontend Roster → plan_from_roster() → Plan JSON → Orchestrator → Filter → Agents
+                                                         ↓
+                                 Validation + Re-routing + Retry Logic
+                                                         ↓
+                                             OrchestrationResult
 ```
+
+Each agent slot the user adds to the office roster becomes one execution step, ordered
+exactly as the user arranged them. The result includes per-step outputs keyed by step
+number so duplicate agents (e.g. two Searchers) each have their own result slot.
 
 ## Setup
 
@@ -58,10 +62,15 @@ Health check and Gemini key status.
 ### `POST /api/plan`
 Generate an execution plan without running agents.
 
+When `agents` is provided the plan is built directly from the roster (no Gemini call)
+for instant, deterministic preview. When omitted the Planner generates one via Gemini.
+
 **Request:**
 ```json
 {
-  "query": "Impact of AI on modern education"
+  "query": "Impact of AI on modern education",
+  "office_type": "research",
+  "agents": ["searcher", "analyzer", "summarizer"]
 }
 ```
 
@@ -72,20 +81,22 @@ Generate an execution plan without running agents.
   "steps": [
     {"step": 1, "agent": "searcher", "depends_on": [], "required": true},
     {"step": 2, "agent": "analyzer", "depends_on": [1], "required": true},
-    {"step": 3, "agent": "summarizer", "depends_on": [2], "required": true},
-    {"step": 4, "agent": "sender", "depends_on": [3], "required": false}
+    {"step": 3, "agent": "summarizer", "depends_on": [2], "required": true}
   ],
   "fallback_rules": ["if analyzer fails, retry searcher max 2 times"]
 }
 ```
 
 ### `POST /api/run`
-Run the full multi-agent pipeline.
+Run the multi-agent pipeline. When `agents` is provided the roster drives execution;
+each slot maps to exactly one step in the order given.
 
 **Request:**
 ```json
 {
-  "query": "Impact of AI on modern education"
+  "query": "Impact of AI on modern education",
+  "office_type": "research",
+  "agents": ["searcher", "analyzer", "summarizer", "sender"]
 }
 ```
 
@@ -93,13 +104,13 @@ Run the full multi-agent pipeline.
 ```json
 {
   "goal": "Impact of AI on modern education",
-  "plan": { ... },
+  "plan": { "..." },
   "success": true,
   "outputs": {
-    "searcher": {"agent": "searcher", "success": true, "output": "...", "feedback": ""},
-    "analyzer": {"agent": "analyzer", "success": true, "output": "...", "feedback": ""},
-    "summarizer": {"agent": "summarizer", "success": true, "output": "...", "feedback": ""},
-    "sender": {"agent": "sender", "success": true, "output": "...", "feedback": ""}
+    "1": {"agent": "searcher", "success": true, "output": "...", "feedback": ""},
+    "2": {"agent": "analyzer", "success": true, "output": "...", "feedback": ""},
+    "3": {"agent": "summarizer", "success": true, "output": "...", "feedback": ""},
+    "4": {"agent": "sender", "success": true, "output": "...", "feedback": ""}
   },
   "final_output": "... formatted deliverable with APA 7 and MLA citations ...",
   "log": [
@@ -109,6 +120,28 @@ Run the full multi-agent pipeline.
     "Step 3 'summarizer' succeeded.",
     "Step 4 'sender' succeeded."
   ]
+}
+```
+
+Note: `outputs` keys are step numbers as strings (`"1"`, `"2"`, …), not role names.
+This lets the same role appear multiple times (e.g. two Searchers) without collisions.
+
+### `POST /api/suggest-workflow`
+Ask Gemini to recommend an ordered agent workflow for a query. Never executes any agents.
+
+**Request:**
+```json
+{
+  "query": "Impact of AI on modern education",
+  "office_type": "research"
+}
+```
+
+**Response:**
+```json
+{
+  "suggested_agents": ["searcher", "analyzer", "summarizer"],
+  "rationale": "A searcher gathers current sources; the analyzer filters out low-quality ones; the summarizer produces the final write-up."
 }
 ```
 
@@ -126,20 +159,47 @@ Produces a 250-400 word concise research summary from validated sources.
 ### Sender
 Formats APA 7 and MLA citations and assembles the final deliverable.
 
+## Roster-Driven Workflow
+
+When the frontend sends `agents: ["searcher", "analyzer", "summarizer"]`, the backend
+calls `plan_from_roster()` to build a linear plan without any Gemini call:
+
+- Step N depends on step N-1 (linear chain).
+- The last step is optional when its role is `sender`.
+- A `fallback_rules` entry is added automatically when both `analyzer` and `searcher`
+  are present, enabling the analyzer-fail → retry-searcher loop.
+
+## Step-Keyed Outputs
+
+Internally the orchestrator tracks results in `dict[int, AgentResult]` keyed by step
+number. This allows the same role to appear in multiple roster slots (e.g. two Searchers)
+without clobbering results.
+
+`build_step_context()` in `filter.py` converts the step-keyed dict to a role-keyed
+`dict[str, AgentResult]` for each agent's `context` argument. Each role maps to the
+most recent completed output for that role among all prior steps.
+
+The final `OrchestrationResult.outputs` exposes the step-keyed results as string keys
+(`"1"`, `"2"`, …) in the JSON response.
+
 ## Plan-Then-Execute Flow
 
-1. **Planning**: Planner agent calls Gemini with structured output to generate a `Plan` (or falls back to the default Research Office plan).
+1. **Plan source**: `plan_from_roster()` when the roster is provided; Planner (Gemini)
+   otherwise.
 
-2. **Approval**: (v1 auto-approves; hook exists for user confirmation).
+2. **Approval**: v1 auto-approves; hook exists for user confirmation.
 
 3. **Execution Loop**:
-   - `get_next_step`: Select next runnable step whose dependencies succeeded.
-   - Run the agent with query + context (previous outputs).
+   - `get_next_step`: Select next runnable step whose dependencies have succeeded.
+   - `build_step_context`: Build role-keyed context from prior step outputs.
+   - Run the agent with query + context.
    - `validate_step`: Check agent identity, success, output presence, dependencies.
-   - On failure: consult `should_retry` + `fallback_rules` to re-route (e.g., analyzer fail → retry searcher).
+   - On failure: consult `should_retry` + `fallback_rules` to re-route (e.g.,
+     analyzer fail → retry the most recent prior searcher step).
    - Bounded by max attempts derived from fallback rules.
 
-4. **Completion**: All required steps done → return `OrchestrationResult` with final deliverable.
+4. **Completion**: All required steps done → return `OrchestrationResult` with final
+   deliverable taken from the last non-skipped sender or summarizer step.
 
 ## Environment Variables
 
@@ -196,9 +256,27 @@ result = orch.run("Test query")
 print(result.success, result.final_output)
 ```
 
+## Available Research Agents
+
+| Agent | Role |
+|-------|------|
+| `searcher` | Collects 5-8 credible sources. Responds to analyzer feedback on retry. |
+| `analyzer` | Reviews source quality; returns `success: false` + actionable feedback when sources are weak, triggering a re-route back to searcher. |
+| `summarizer` | Produces a 250-400 word concise research summary from validated sources. |
+| `sender` | Formats APA 7 and MLA citations and assembles the final deliverable. |
+
+## Validation Rules
+
+| Scenario | Behaviour |
+|----------|-----------|
+| Empty `agents` list | Backend returns `400` — frontend blocks this before sending |
+| Unknown agent role | Backend returns `400` with a clear error message |
+| `office_type != "research"` | Backend returns `400` — Developer Office not yet supported |
+| Analyzer fails | Fallback rule retries the most recent prior searcher step (max 2 times) |
+| Optional step skipped | Marked with `[skipped: optional step]` in outputs; does not block success |
+
 ## Next Steps
 
-- Frontend integration (your friend's part)
 - Add SaaS Developer Office agents (Planner, Executor, QA, Deployer, Marketing)
 - User approval hook for plan confirmation
 - Streaming responses for long-running orchestration
