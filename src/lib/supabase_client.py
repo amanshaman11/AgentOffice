@@ -38,11 +38,14 @@ def _is_bucket_error(error: Exception) -> bool:
     )
 
 
-async def upload_pdf(
-    file_path: str, pdf_data: bytes, bucket: str = "research-pdfs"
+async def upload_bytes(
+    file_path: str,
+    data: bytes,
+    bucket: str,
+    content_type: str,
 ) -> str | None:
     """
-    Upload PDF to Supabase Storage and return public URL.
+    Upload arbitrary bytes to a Supabase Storage bucket and return the public URL.
 
     Returns None when the bucket is missing, empty, or upload otherwise fails.
     """
@@ -54,22 +57,36 @@ async def upload_pdf(
 
         response = client.storage.from_(bucket).upload(
             file_path,
-            pdf_data,
-            file_options={"content-type": "application/pdf", "upsert": "true"},
+            data,
+            file_options={"content-type": content_type, "upsert": "true"},
         )
 
         if hasattr(response, "error") and response.error:
-            print(f"Warning: PDF upload failed for bucket '{bucket}': {response.error}")
+            print(f"Warning: upload failed for bucket '{bucket}': {response.error}")
             return None
 
         return client.storage.from_(bucket).get_public_url(file_path)
 
     except Exception as error:
         if _is_bucket_error(error):
-            print(f"Warning: Storage bucket '{bucket}' unavailable, skipping PDF upload")
+            print(f"Warning: Storage bucket '{bucket}' unavailable, skipping upload")
         else:
-            print(f"Warning: Failed to upload PDF: {error}")
+            print(f"Warning: Failed to upload to '{bucket}': {error}")
         return None
+
+
+async def upload_pdf(
+    file_path: str, pdf_data: bytes, bucket: str = "research-pdfs"
+) -> str | None:
+    """Upload a PDF to Supabase Storage and return its public URL (or None)."""
+    return await upload_bytes(file_path, pdf_data, bucket, "application/pdf")
+
+
+async def upload_project_zip(
+    file_path: str, zip_data: bytes, bucket: str = "developer-projects"
+) -> str | None:
+    """Upload a project zip to Supabase Storage and return its public URL (or None)."""
+    return await upload_bytes(file_path, zip_data, bucket, "application/zip")
 
 
 async def delete_pdf(file_path: str, bucket: str = "research-pdfs") -> None:

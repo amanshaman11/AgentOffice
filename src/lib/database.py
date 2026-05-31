@@ -36,9 +36,19 @@ def init_database() -> None:
                 outputs_json TEXT NOT NULL,
                 log_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                execution_time_ms INTEGER
+                execution_time_ms INTEGER,
+                office_type TEXT NOT NULL DEFAULT 'research',
+                artifact_url TEXT
             )
         """)
+
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(research_history)")}
+        if "office_type" not in existing:
+            conn.execute(
+                "ALTER TABLE research_history ADD COLUMN office_type TEXT NOT NULL DEFAULT 'research'"
+            )
+        if "artifact_url" not in existing:
+            conn.execute("ALTER TABLE research_history ADD COLUMN artifact_url TEXT")
         
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_research_created 
@@ -83,14 +93,16 @@ def save_research(
     outputs: dict[str, Any],
     log: list[str],
     execution_time_ms: int,
+    office_type: str = "research",
+    artifact_url: str | None = None,
 ) -> int:
     conn = _get_connection()
     try:
         cursor = conn.execute(
             """
             INSERT INTO research_history 
-            (query, goal, success, final_output, plan_json, outputs_json, log_json, created_at, execution_time_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (query, goal, success, final_output, plan_json, outputs_json, log_json, created_at, execution_time_ms, office_type, artifact_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -102,6 +114,8 @@ def save_research(
                 json.dumps(log),
                 datetime.utcnow().isoformat(),
                 execution_time_ms,
+                office_type,
+                artifact_url,
             ),
         )
         conn.commit()
@@ -146,7 +160,7 @@ def get_research_history(limit: int = 50) -> list[dict[str, Any]]:
     try:
         cursor = conn.execute(
             """
-            SELECT id, query, goal, success, final_output, created_at, execution_time_ms
+            SELECT id, query, goal, success, final_output, created_at, execution_time_ms, office_type, artifact_url
             FROM research_history 
             ORDER BY created_at DESC 
             LIMIT ?
@@ -158,12 +172,24 @@ def get_research_history(limit: int = 50) -> list[dict[str, Any]]:
         conn.close()
 
 
+def update_research_artifact_url(research_id: int, artifact_url: str) -> None:
+    conn = _get_connection()
+    try:
+        conn.execute(
+            "UPDATE research_history SET artifact_url = ? WHERE id = ?",
+            (artifact_url, research_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_research_by_id(research_id: int) -> dict[str, Any] | None:
     conn = _get_connection()
     try:
         cursor = conn.execute(
             """
-            SELECT id, query, goal, success, final_output, plan_json, outputs_json, log_json, created_at, execution_time_ms
+            SELECT id, query, goal, success, final_output, plan_json, outputs_json, log_json, created_at, execution_time_ms, office_type, artifact_url
             FROM research_history 
             WHERE id = ?
             """,
@@ -187,7 +213,7 @@ def search_similar_research(query: str, limit: int = 5) -> list[dict[str, Any]]:
     try:
         cursor = conn.execute(
             """
-            SELECT id, query, goal, final_output, created_at, execution_time_ms
+            SELECT id, query, goal, final_output, created_at, execution_time_ms, office_type, artifact_url
             FROM research_history 
             WHERE success = 1 
             AND (query LIKE ? OR goal LIKE ?)

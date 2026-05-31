@@ -3,8 +3,8 @@
 import { useAgentStore, type RunStep } from "@/lib/store/agents";
 import {
   runQuery as apiRun,
-  type OrchestrationResult,
   type RunPayload,
+  type RunResult,
 } from "@/lib/api";
 import type { RoleId } from "@/lib/roles";
 
@@ -81,9 +81,7 @@ async function animateByStep(
  * agents in the room by replaying the backend log. Returns the full result so
  * callers (e.g. the chat) can display the final output.
  */
-export async function runQueryAndAnimate(
-  query: string,
-): Promise<OrchestrationResult | null> {
+export async function runQueryAndAnimate(query: string): Promise<RunResult | null> {
   const trimmed = query.trim();
   if (!trimmed) return null;
 
@@ -120,7 +118,7 @@ export async function runQueryAndAnimate(
   );
   appendLog(systemStep("Calling backend…"));
 
-  let result: OrchestrationResult;
+  let result: RunResult;
   try {
     result = await apiRun(payload);
   } catch (err) {

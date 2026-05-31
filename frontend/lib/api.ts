@@ -24,14 +24,21 @@ export interface OrchestrationResult {
   goal: string;
   plan: Plan;
   success: boolean;
-  outputs: Record<string, AgentResult>;  // keys are step numbers as strings ("1", "2", …)
+  outputs: Record<string, AgentResult>;
   final_output: string;
   log: string[];
+}
+
+export interface RunResult extends OrchestrationResult {
+  research_id?: number | null;
+  office_type?: "research" | "developer";
+  artifact_url?: string | null;
 }
 
 export interface HealthResponse {
   status: string;
   gemini_key: string;
+  openai_key: string;
 }
 
 export interface WorkflowSuggestion {
@@ -89,8 +96,8 @@ export function getPlan(payload: RunPayload): Promise<Plan> {
   });
 }
 
-export function runQuery(payload: RunPayload): Promise<OrchestrationResult> {
-  return http<OrchestrationResult>("/api/run", {
+export function runQuery(payload: RunPayload): Promise<RunResult> {
+  return http<RunResult>("/api/run", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -103,5 +110,44 @@ export function suggestWorkflow(
   return http<WorkflowSuggestion>("/api/suggest-workflow", {
     method: "POST",
     body: JSON.stringify({ query, office_type }),
+  });
+}
+
+export interface ProjectFile {
+  path: string;
+  content: string;
+  language: string;
+}
+
+export interface ProjectResponse {
+  success: boolean;
+  research_id: number;
+  query: string;
+  goal: string;
+  office_type: string;
+  artifact_url: string | null;
+  files: ProjectFile[];
+  setup_instructions: string;
+}
+
+export interface EditProjectResponse {
+  success: boolean;
+  research_id: number;
+  files: ProjectFile[];
+  setup_instructions: string;
+  artifact_url: string | null;
+}
+
+export function getProjectFiles(researchId: number): Promise<ProjectResponse> {
+  return http<ProjectResponse>(`/api/projects/${researchId}`);
+}
+
+export function editProject(
+  researchId: number,
+  instruction: string,
+): Promise<EditProjectResponse> {
+  return http<EditProjectResponse>(`/api/projects/${researchId}/edit`, {
+    method: "POST",
+    body: JSON.stringify({ instruction }),
   });
 }

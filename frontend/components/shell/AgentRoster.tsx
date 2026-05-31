@@ -73,7 +73,7 @@ export function AgentRoster() {
   ];
 
   const isDevOffice = office.type === "developer";
-  const canRun = !run.isRunning && agents.length > 0 && !isDevOffice;
+  const canRun = !run.isRunning && agents.length > 0;
 
   const handleRun = () => {
     if (run.isRunning) {
@@ -153,11 +153,9 @@ export function AgentRoster() {
         )}
       </div>
 
-      {isDevOffice && (
+      {isDevOffice && agents.length === 0 && (
         <div className="panel px-3 py-2 text-[11px] text-[var(--color-text-dim)] text-center leading-snug">
-          Developer workflows coming soon.
-          <br />
-          Switch to Research Office to run.
+          Add Planner → Executor → QA → Deployer → Marketing, then run via Chat.
         </div>
       )}
 
@@ -182,7 +180,7 @@ export function AgentRoster() {
               : agents.length === 0
                 ? "Add agents to your office first"
                 : isDevOffice
-                  ? "Developer office not yet supported"
+                  ? "Open chat to run a developer workflow"
                   : "Open chat to send a query"
           }
         >

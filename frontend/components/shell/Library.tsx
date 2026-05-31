@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Search, Calendar, Clock, ExternalLink } from "lucide-react";
+import { FileText, Search, Calendar, Clock, ExternalLink, Package } from "lucide-react";
+import { PreviewProjectButton } from "@/components/shell/PreviewProjectButton";
 import {
   fetchDocuments,
-  getDocumentPdfUrl,
+  getDocumentArtifact,
   searchDocuments,
   type ResearchDocument,
 } from "@/lib/supabase";
@@ -60,7 +61,7 @@ export function Library() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const openDocument = (doc: ResearchDocument) => {
-    const url = getDocumentPdfUrl(doc);
+    const { url } = getDocumentArtifact(doc);
     if (url) {
       window.open(url, "_blank");
       return;
@@ -113,7 +114,7 @@ export function Library() {
                 key={doc.id}
                 doc={doc}
                 onOpen={() => openDocument(doc)}
-                pdfAvailable={Boolean(getDocumentPdfUrl(doc))}
+                artifact={getDocumentArtifact(doc)}
                 expanded={expandedId === doc.id}
                 onToggleExpanded={() =>
                   setExpandedId((current) => (current === doc.id ? null : doc.id))
@@ -132,7 +133,7 @@ export function Library() {
 interface DocumentCardProps {
   doc: ResearchDocument;
   onOpen: () => void;
-  pdfAvailable: boolean;
+  artifact: { url: string | null; kind: "pdf" | "zip" };
   expanded: boolean;
   onToggleExpanded: () => void;
   formatDate: (date: string) => string;
@@ -142,12 +143,14 @@ interface DocumentCardProps {
 function DocumentCard({
   doc,
   onOpen,
-  pdfAvailable,
+  artifact,
   expanded,
   onToggleExpanded,
   formatDate,
   formatTime,
 }: DocumentCardProps) {
+  const isDev = (doc.office_type ?? "research") === "developer";
+  const canDownload = Boolean(artifact.url);
 
   return (
     <div className="bg-[var(--color-bg-2)] border border-[var(--color-stroke)] rounded-lg p-3 hover:border-[var(--color-neon-violet)] hover:border-opacity-50 transition group">
@@ -164,9 +167,23 @@ function DocumentCard({
         <button
           onClick={onOpen}
           className="flex-none p-1.5 rounded hover:bg-[var(--color-bg-3)] text-[var(--color-text-muted)] hover:text-[var(--color-neon-violet)] transition"
-          title={pdfAvailable ? "View PDF" : "View summary"}
+          title={
+            canDownload
+              ? isDev
+                ? "Download project zip"
+                : "View PDF"
+              : "View summary"
+          }
         >
-          {pdfAvailable ? <ExternalLink size={16} /> : <FileText size={16} />}
+          {canDownload ? (
+            isDev ? (
+              <Package size={16} />
+            ) : (
+              <ExternalLink size={16} />
+            )
+          ) : (
+            <FileText size={16} />
+          )}
         </button>
       </div>
 
@@ -180,6 +197,12 @@ function DocumentCard({
           {formatTime(doc.execution_time_ms)}
         </span>
       </div>
+
+      {isDev && /^\d+$/.test(doc.id) && (
+        <div className="mt-3">
+          <PreviewProjectButton researchId={Number(doc.id)} variant="ghost" />
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-3 pt-3 border-t border-[var(--color-stroke)]">

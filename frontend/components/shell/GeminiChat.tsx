@@ -9,12 +9,15 @@ import {
   CornerDownLeft,
   Wand2,
   Check,
+  Download,
+  Package,
 } from "lucide-react";
 import clsx from "clsx";
+import { PreviewProjectButton } from "@/components/shell/PreviewProjectButton";
 import { useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { useUiStore } from "@/lib/store/ui";
 import { useAgentStore } from "@/lib/store/agents";
-import { GEMINI_MODEL_LABEL } from "@/lib/config";
+import { BACKEND_URL, GEMINI_MODEL_LABEL } from "@/lib/config";
 import { ROLES, type RoleId } from "@/lib/roles";
 
 export function GeminiChat() {
@@ -124,7 +127,7 @@ export function GeminiChat() {
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Ask the office a research question…"
+            placeholder="Describe your SaaS idea or research question…"
             disabled={busy}
             className="flex-1 resize-none bg-transparent text-sm placeholder:text-[var(--color-text-dim)] focus:outline-none max-h-[140px] disabled:opacity-50"
           />
@@ -160,6 +163,14 @@ export function GeminiChat() {
 }
 
 function MessageItem({ message }: { message: ChatMessage }) {
+  if (message.developerMeta) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Bubble role={message.role} text={message.text} />
+        <DeveloperRunActions meta={message.developerMeta} />
+      </div>
+    );
+  }
   if (!message.suggestedAgents) {
     return <Bubble role={message.role} text={message.text} />;
   }
@@ -167,6 +178,44 @@ function MessageItem({ message }: { message: ChatMessage }) {
     <div className="flex flex-col gap-1.5">
       <Bubble role={message.role} text={message.text} />
       <ApplyWorkflowButton agents={message.suggestedAgents} />
+    </div>
+  );
+}
+
+function DeveloperRunActions({
+  meta,
+}: {
+  meta: NonNullable<ChatMessage["developerMeta"]>;
+}) {
+  if (meta.researchId == null && !meta.zipUrl && meta.filePaths.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 justify-start px-1">
+      {meta.researchId != null && (
+        <PreviewProjectButton researchId={meta.researchId} />
+      )}
+      {meta.zipUrl && (
+        <a
+          href={meta.zipUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-neon text-xs !py-1.5 !px-3 inline-flex items-center gap-1.5"
+        >
+          <Package size={14} />
+          Download project (.zip)
+        </a>
+      )}
+      {meta.researchId != null && (
+        <a
+          href={`${BACKEND_URL}/api/projects/${meta.researchId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-ghost text-xs !py-1.5 !px-3 inline-flex items-center gap-1.5"
+        >
+          <Download size={14} />
+          Project manifest
+        </a>
+      )}
     </div>
   );
 }

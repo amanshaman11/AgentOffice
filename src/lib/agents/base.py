@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from .gemini_client import GeminiError, generate_text
+from .openai_client import OpenAIError
 from .schemas import AgentResult
 
 
@@ -30,7 +31,7 @@ class BaseAgent(ABC):
 
         try:
             return self._execute(query, context or {})
-        except GeminiError as error:
+        except (GeminiError, OpenAIError) as error:
             return AgentResult(agent=self.name, success=False, feedback=str(error))
         except Exception as error:  # noqa: BLE001 - defensive boundary for the pipeline
             return AgentResult(
