@@ -11,6 +11,7 @@ const POLL_MS = 15_000;
 
 export function BackendStatus() {
   const [status, setStatus] = useState<Status>("checking");
+  const [label, setLabel] = useState("Checking backend…");
 
   useEffect(() => {
     let cancelled = false;
@@ -19,12 +20,22 @@ export function BackendStatus() {
       try {
         const h = await getHealth();
         if (cancelled) return;
-        setStatus(
-          h.gemini_key === "set" && h.openai_key === "set" ? "ok" : "no-key",
+        const apisReady = h.gemini_key === "set" && h.openai_key === "set";
+        if (!apisReady) {
+          setStatus("no-key");
+          setLabel("Backend up · API key missing (Gemini and/or OpenAI)");
+          return;
+        }
+        setStatus("ok");
+        setLabel(
+          h.vercel_token === "set"
+            ? "Backend connected · APIs ready · Vercel ready"
+            : "Backend connected · APIs ready · Vercel token missing",
         );
       } catch {
         if (cancelled) return;
         setStatus("offline");
+        setLabel(`Backend offline (${BACKEND_URL})`);
       }
     }
 
@@ -36,20 +47,14 @@ export function BackendStatus() {
     };
   }, []);
 
-  const palette: Record<Status, { color: string; label: string }> = {
-    checking: { color: "var(--color-text-dim)", label: "Checking backend…" },
-    ok: { color: "var(--color-neon-green)", label: "Backend connected · APIs ready" },
-    "no-key": {
-      color: "var(--color-neon-amber)",
-      label: "Backend up · API key missing (Gemini and/or OpenAI)",
-    },
-    offline: {
-      color: "var(--color-neon-pink)",
-      label: `Backend offline (${BACKEND_URL})`,
-    },
+  const palette: Record<Status, string> = {
+    checking: "var(--color-text-dim)",
+    ok: "var(--color-neon-green)",
+    "no-key": "var(--color-neon-amber)",
+    offline: "var(--color-neon-pink)",
   };
 
-  const { color, label } = palette[status];
+  const color = palette[status];
 
   return (
     <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">

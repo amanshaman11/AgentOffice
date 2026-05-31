@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import {
-  ROLES,
+  getRole,
   ROLE_LIST,
   type RoleId,
   type OfficeType,
@@ -155,7 +155,7 @@ export function AgentRoster() {
 
       {isDevOffice && agents.length === 0 && (
         <div className="panel px-3 py-2 text-[11px] text-[var(--color-text-dim)] text-center leading-snug">
-          Add Planner → Executor → QA → Deployer → Marketing, then run via Chat.
+          Add Planner → Executor → QA, then run via Chat.
         </div>
       )}
 
@@ -219,7 +219,7 @@ export function AgentRoster() {
           </div>
         ) : (
           agents.map((a, i) => {
-            const role = ROLES[a.roleId];
+            const role = getRole(a.roleId);
             const isSelected = selectedAgentId === a.id;
             const isActive = run.activeAgentId === a.id;
             return (
@@ -340,9 +340,9 @@ function ActivityLog() {
           log.map((step, idx) => {
             const agent = agents.find((a) => a.id === step.agentId);
             const role = agent
-              ? ROLES[agent.roleId]
+              ? getRole(agent.roleId)
               : step.roleId
-                ? ROLES[step.roleId]
+                ? getRole(step.roleId)
                 : null;
             const isSystem = step.agentId.startsWith("_system");
             const isMissing = step.agentId.startsWith("_missing");

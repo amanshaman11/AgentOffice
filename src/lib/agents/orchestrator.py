@@ -20,7 +20,7 @@ _SKIPPED_MARKER = "[skipped: optional step]"
 
 _TERMINAL_PREFERENCE = {
     "research": ("sender", "summarizer"),
-    "developer": ("executor", "deployer", "marketing", "qa"),
+    "developer": ("executor", "qa"),
 }
 
 

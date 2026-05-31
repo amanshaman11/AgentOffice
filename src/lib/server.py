@@ -35,6 +35,7 @@ from .pdf_generator import generate_research_pdf
 from .project_packager import build_project_zip, extract_executor_files
 from .research_history import ResearchHistory
 from .supabase_client import is_supabase_configured, upload_pdf, upload_project_zip
+from .vercel_deploy import VercelDeployError, deploy_to_vercel, project_name_from_query
 from .websocket_manager import manager
 
 _SUPPORTED_OFFICES = {"research", "developer"}
@@ -279,6 +280,7 @@ def health() -> dict:
         "version": "2.0.0",
         "gemini_key": "set" if os.getenv("GEMINI_API_KEY") else "missing",
         "openai_key": "set" if os.getenv("OPENAI_API_KEY") else "missing",
+        "vercel_token": "set" if os.getenv("VERCEL_API_TOKEN") else "missing",
         "supabase": "configured" if is_supabase_configured() else "not_configured",
         "uptime_seconds": _metrics.get_uptime_seconds(),
     }
@@ -631,6 +633,45 @@ async def edit_project(research_id: int, body: EditRequest) -> dict:
         "files": updated_files,
         "setup_instructions": updated_output.setup_instructions,
         "artifact_url": artifact_url,
+    }
+
+
+@app.post("/api/projects/{research_id}/deploy")
+async def deploy_project(research_id: int) -> dict:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if research.get("office_type") != "developer":
+        raise HTTPException(status_code=400, detail="Only developer projects can be deployed.")
+
+    vercel_token = os.getenv("VERCEL_API_TOKEN", "").strip()
+    if not vercel_token:
+        raise HTTPException(
+            status_code=503,
+            detail="VERCEL_API_TOKEN is not configured on the backend.",
+        )
+
+    files = []
+    for output in research.get("outputs", {}).values():
+        if isinstance(output, dict) and output.get("agent") == "executor":
+            files = extract_executor_files(output.get("output") or "")
+            if files:
+                break
+
+    if not files:
+        raise HTTPException(status_code=422, detail="No generated files found for this project.")
+
+    project_name = project_name_from_query(research.get("query") or research.get("goal") or "project")
+    try:
+        result = await deploy_to_vercel(files, project_name, vercel_token)
+    except VercelDeployError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return {
+        "success": True,
+        "deployment_url": result["deployment_url"],
+        "deployment_id": result["deployment_id"],
+        "project_name": result["project_name"],
     }
 
 

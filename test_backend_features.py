@@ -84,7 +84,7 @@ def test_pdf_export(research_id: int):
 
 def test_websocket():
     print("7. WebSocket Streaming Test...")
-    print("   (WebSocket requires async client - see BACKEND_FEATURES.md for example)")
+    print("   (WebSocket requires async client - see DOCUMENTATION.md for example)")
     print()
 
 

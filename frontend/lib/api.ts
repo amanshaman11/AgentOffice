@@ -39,6 +39,7 @@ export interface HealthResponse {
   status: string;
   gemini_key: string;
   openai_key: string;
+  vercel_token: string;
 }
 
 export interface WorkflowSuggestion {
@@ -149,5 +150,18 @@ export function editProject(
   return http<EditProjectResponse>(`/api/projects/${researchId}/edit`, {
     method: "POST",
     body: JSON.stringify({ instruction }),
+  });
+}
+
+export interface DeployProjectResponse {
+  success: boolean;
+  deployment_url: string;
+  deployment_id: string;
+  project_name: string;
+}
+
+export function deployProject(researchId: number): Promise<DeployProjectResponse> {
+  return http<DeployProjectResponse>(`/api/projects/${researchId}/deploy`, {
+    method: "POST",
   });
 }

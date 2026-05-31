@@ -9,7 +9,6 @@ import {
   Send,
   Lightbulb,
   Code2,
-  CloudUpload,
   Megaphone,
   RefreshCw,
   CheckCircle2,
@@ -309,8 +308,6 @@ export function LandingPage() {
               <FlowStep n={1} icon={<Lightbulb size={20} />} title="Planner" color="#4ad6ff" />
               <FlowStep n={2} icon={<Code2 size={20} />} title="Executor" color="#8a7bff" />
               <FlowStep n={3} icon={<Shield size={20} />} title="QA Engineer" color="#ff5bd1" />
-              <FlowStep n={4} icon={<CloudUpload size={20} />} title="Deployer" color="#43e3a4" />
-              <FlowStep n={5} icon={<Megaphone size={20} />} title="Marketing" color="#ffb547" />
             </div>
           </div>
         </SectionShell>

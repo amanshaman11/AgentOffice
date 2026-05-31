@@ -6,7 +6,6 @@ export interface DeveloperRunMeta {
   zipUrl: string | null;
   filePaths: string[];
   setupInstructions: string;
-  tagline: string | null;
   success: boolean;
 }
 
@@ -28,14 +27,10 @@ export function buildDeveloperRunMeta(
   artifactUrl?: string | null,
 ): DeveloperRunMeta {
   const executor = findOutput(result, "executor");
-  const marketing = findOutput(result, "marketing");
   const executorData = executor?.output
     ? parseJson<{ files?: { path: string }[]; setup_instructions?: string }>(
         executor.output,
       )
-    : null;
-  const marketingData = marketing?.output
-    ? parseJson<{ tagline?: string }>(marketing.output)
     : null;
 
   const filePaths = executorData?.files?.map((f) => f.path) ?? [];
@@ -50,7 +45,6 @@ export function buildDeveloperRunMeta(
     zipUrl,
     filePaths,
     setupInstructions: executorData?.setup_instructions ?? "",
-    tagline: marketingData?.tagline ?? null,
     success: result.success,
   };
 }
@@ -60,10 +54,6 @@ export function formatDeveloperResultForChat(
   meta: DeveloperRunMeta,
 ): string {
   const lines: string[] = [];
-
-  if (meta.tagline) {
-    lines.push(`**${meta.tagline}**`, "");
-  }
 
   lines.push(`**Goal:** ${result.goal}`, "");
 
@@ -82,20 +72,6 @@ export function formatDeveloperResultForChat(
 
   if (meta.setupInstructions) {
     lines.push("**Setup:**", meta.setupInstructions, "");
-  }
-
-  const deployer = findOutput(result, "deployer");
-  if (deployer?.output) {
-    const deploy = parseJson<{ platform_recommendation?: string; steps?: string[] }>(
-      deployer.output,
-    );
-    if (deploy?.platform_recommendation) {
-      lines.push(`**Deploy to:** ${deploy.platform_recommendation}`);
-      if (deploy.steps?.length) {
-        lines.push("1. " + deploy.steps.slice(0, 5).join("\n2. "));
-      }
-      lines.push("");
-    }
   }
 
   if (meta.zipUrl) {

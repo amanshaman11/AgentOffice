@@ -5,9 +5,7 @@ export type RoleId =
   | "sender"
   | "planner"
   | "executor"
-  | "qa"
-  | "deployer"
-  | "marketing";
+  | "qa";
 
 export type OfficeType = "research" | "developer";
 
@@ -77,22 +75,24 @@ export const ROLES: Record<RoleId, RoleDef> = {
     color: "#ff5bd1",
     emissive: "#ff5bd1",
   },
-  deployer: {
-    id: "deployer",
-    name: "Deployer",
-    office: "developer",
-    description: "Creates deployment checklist",
-    color: "#43e3a4",
-    emissive: "#43e3a4",
-  },
-  marketing: {
-    id: "marketing",
-    name: "Marketing",
-    office: "developer",
-    description: "Generates launch content",
-    color: "#ffb547",
-    emissive: "#ffb547",
-  },
 };
 
 export const ROLE_LIST: RoleDef[] = Object.values(ROLES);
+
+const FALLBACK_ROLE: RoleDef = {
+  id: "planner",
+  name: "Unknown",
+  office: "developer",
+  description: "Removed role",
+  color: "#888899",
+  emissive: "#888899",
+};
+
+export function isKnownRole(roleId: string): roleId is RoleId {
+  return roleId in ROLES;
+}
+
+export function getRole(roleId: string): RoleDef {
+  if (isKnownRole(roleId)) return ROLES[roleId];
+  return { ...FALLBACK_ROLE, id: roleId as RoleId, name: roleId };
+}

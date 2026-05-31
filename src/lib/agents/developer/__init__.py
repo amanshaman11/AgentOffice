@@ -5,10 +5,8 @@ from __future__ import annotations
 import os
 
 from ..base import BaseAgent
-from .deployer import DeployerAgent
 from .editor import EditorAgent
 from .executor import ExecutorAgent
-from .marketing import MarketingAgent
 from .planner_agent import DeveloperPlannerAgent
 from .qa import QAAgent
 
@@ -25,8 +23,6 @@ def build_developer_agents(
         DeveloperPlannerAgent(model=model),
         ExecutorAgent(model=coding_model),
         QAAgent(model=model),
-        DeployerAgent(model=model),
-        MarketingAgent(model=model),
     ]
     return {agent.name: agent for agent in agents}
 
@@ -35,8 +31,6 @@ __all__ = [
     "DeveloperPlannerAgent",
     "ExecutorAgent",
     "QAAgent",
-    "DeployerAgent",
-    "MarketingAgent",
     "EditorAgent",
     "build_developer_agents",
 ]
