@@ -10,13 +10,13 @@ from .schemas import Plan, PlanStep
 DEFAULT_AGENT_SEQUENCE = ("searcher", "analyzer", "summarizer", "sender")
 RESEARCH_ROLES = frozenset(DEFAULT_AGENT_SEQUENCE)
 
-DEVELOPER_AGENT_SEQUENCE = ("planner", "executor", "qa", "deployer", "marketing")
+DEVELOPER_AGENT_SEQUENCE = ("planner", "executor", "qa")
 DEVELOPER_ROLES = frozenset(DEVELOPER_AGENT_SEQUENCE)
 
 _OFFICE_ROLES = {"research": RESEARCH_ROLES, "developer": DEVELOPER_ROLES}
 _OPTIONAL_TERMINAL_ROLES = {
     "research": frozenset({"sender"}),
-    "developer": frozenset({"deployer", "marketing"}),
+    "developer": frozenset(),
 }
 
 
@@ -44,8 +44,6 @@ def default_developer_plan(goal: str) -> Plan:
             PlanStep(step=1, agent="planner", depends_on=[], required=True),
             PlanStep(step=2, agent="executor", depends_on=[1], required=True),
             PlanStep(step=3, agent="qa", depends_on=[2], required=True),
-            PlanStep(step=4, agent="deployer", depends_on=[3], required=True),
-            PlanStep(step=5, agent="marketing", depends_on=[4], required=False),
         ],
         fallback_rules=["if qa fails, retry executor max 5 times"],
     )
@@ -115,10 +113,9 @@ _WORKFLOW_INSTRUCTIONS = {
         "Given a product idea, recommend an ordered list of developer agents to run. "
         f"Available agents: {', '.join(DEVELOPER_AGENT_SEQUENCE)}. "
         "The planner turns the idea into a build plan, the executor generates code, "
-        "the qa reviews the code and requests fixes, the deployer produces a "
-        "deployment checklist, and marketing generates launch content. Return only "
-        "agents from the available list in recommended execution order. Include a "
-        "brief rationale (1-2 sentences)."
+        "and the qa reviews the code and requests fixes. Return only agents from "
+        "the available list in recommended execution order. Include a brief "
+        "rationale (1-2 sentences)."
     ),
 }
 

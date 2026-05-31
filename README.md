@@ -77,8 +77,8 @@ Designed for software development projects.
 | Planner | Converts ideas into development plans |
 | Executor | Generates code and builds functionality |
 | QA Engineer | Reviews code and sends feedback for fixes |
-| Deployer | Creates deployment checklist and instructions |
-| Marketing Manager | Generates launch content and social media assets |
+
+Deploy finished projects from the preview panel with one click (requires `VERCEL_API_TOKEN` on the backend).
 
 **Intervention System:** QA reviews all code. If issues are found, workflow returns to Executor until requirements are met.
 
@@ -110,6 +110,17 @@ Instead of talking to one assistant, users manage an entire AI workforce.
 
 ## Getting Started
 
+See [DOCUMENTATION.md](DOCUMENTATION.md) for full API reference, Supabase setup, library flow, Vercel deploy, and **Docker VPS deployment**.
+
+### Docker (production on VPS)
+
+```bash
+cp .env.example .env   # set GEMINI_API_KEY, OPENAI_API_KEY, PUBLIC_URL
+docker compose up -d --build
+```
+
+See [DOCUMENTATION.md — Docker Deployment](DOCUMENTATION.md#docker-deployment-vps) for full VPS setup including HTTPS.
+
 ### Prerequisites
 
 - Node.js (v18 or later)
@@ -130,6 +141,8 @@ pip install -r requirements.txt
 # Add your Gemini API key
 cp .env.example .env
 # Edit .env and set GEMINI_API_KEY=your_key_here
+# Optional: set VERCEL_API_TOKEN for one-click deploy from the preview panel
+# Create a token at https://vercel.com/account/tokens
 
 # Install frontend dependencies
 cd frontend && npm install && cd ..

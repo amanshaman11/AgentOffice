@@ -10,16 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.lib.agents.developer.deployer import DeployerAgent
-from src.lib.agents.developer.marketing import MarketingAgent
-from src.lib.agents.developer.schemas import MarketingAssets, SocialPost
 from src.lib.agents.developer.editor import EditorAgent
 from src.lib.agents.developer.executor import ExecutorAgent
 from src.lib.agents.developer.planner_agent import DeveloperPlannerAgent
 from src.lib.agents.developer.qa import QAAgent
 from src.lib.agents.developer.schemas import (
     CodeFile,
-    DeployChecklist,
     DevPlanOutput,
     ExecutorOutput,
     Milestone,
@@ -80,10 +76,9 @@ class PlanFromRosterTests(unittest.TestCase):
     def test_default_developer_plan(self) -> None:
         plan = default_developer_plan("Build a todo app")
         self.assertEqual(plan.goal, "Build a todo app")
-        self.assertEqual(len(plan.steps), 5)
-        self.assertEqual(plan.steps[-1].agent, "marketing")
-        self.assertFalse(plan.steps[-1].required)
-        self.assertTrue(plan.steps[3].required)
+        self.assertEqual(len(plan.steps), 3)
+        self.assertEqual(plan.steps[-1].agent, "qa")
+        self.assertTrue(plan.steps[-1].required)
 
 
 class ProjectPackagerTests(unittest.TestCase):
@@ -205,36 +200,6 @@ class DeveloperAgentTests(unittest.TestCase):
             result = QAAgent().run("Build a todo app", context=context)
         self.assertTrue(result.success)
 
-    def test_deployer_success(self) -> None:
-        checklist = DeployChecklist(
-            platform_recommendation="Vercel",
-            env_vars=["DATABASE_URL"],
-            steps=["Connect repo", "Deploy"],
-        )
-        context = {
-            "planner": AgentResult(agent="planner", success=True, output=_dev_plan_json()),
-            "executor": AgentResult(agent="executor", success=True, output=_executor_json()),
-        }
-        with patch("src.lib.agents.developer.deployer.generate_json", return_value=checklist):
-            result = DeployerAgent().run("Build a todo app", context=context)
-        self.assertTrue(result.success)
-
-    def test_marketing_success(self) -> None:
-        assets = MarketingAssets(
-            tagline="Todos made simple",
-            feature_bullets=["Fast CRUD", "Clean UI"],
-            launch_copy="Launch your todos today.",
-            social_posts=[SocialPost(platform="Twitter/X", content="Ship todos faster")],
-            email_draft="Hi there — try our todo app.",
-        )
-        context = {
-            "planner": AgentResult(agent="planner", success=True, output=_dev_plan_json()),
-            "executor": AgentResult(agent="executor", success=True, output=_executor_json()),
-        }
-        with patch("src.lib.agents.developer.marketing.generate_json", return_value=assets):
-            result = MarketingAgent().run("Build a todo app", context=context)
-        self.assertTrue(result.success)
-
 
 class QARetryLoopTests(unittest.TestCase):
     def test_qa_failure_reroutes_to_executor(self) -> None:
@@ -284,19 +249,6 @@ class QARetryLoopTests(unittest.TestCase):
             ),
             "executor": StubExecutor(),
             "qa": StubQA(),
-            "deployer": MagicMock(
-                name="deployer",
-                run=MagicMock(
-                    return_value=AgentResult(
-                        agent="deployer",
-                        success=True,
-                        output=DeployChecklist(
-                            platform_recommendation="Vercel",
-                            steps=["Deploy"],
-                        ).model_dump_json(),
-                    )
-                ),
-            ),
         }
 
         orchestrator = Orchestrator(office_type="developer", agents=agents, planner=MagicMock())
@@ -367,7 +319,7 @@ class RegistryTests(unittest.TestCase):
         agents = build_agents("developer")
         self.assertEqual(
             set(agents.keys()),
-            {"planner", "executor", "qa", "deployer", "marketing"},
+            {"planner", "executor", "qa"},
         )
         self.assertEqual(agents["executor"].model, "gpt-5.4-mini")
 

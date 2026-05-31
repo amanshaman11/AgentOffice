@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useCodeStore } from "@/lib/store/code";
+import { VercelDeployButton } from "@/components/shell/VercelDeployButton";
 import { Monitor, Code, Loader2 } from "lucide-react";
 import clsx from "clsx";
 
@@ -68,6 +69,7 @@ export function CodeWorkspace() {
   const activeFilePath = useCodeStore((s) => s.activeFilePath);
   const previewUrl = useCodeStore((s) => s.previewUrl);
   const buildStatus = useCodeStore((s) => s.buildStatus);
+  const researchId = useCodeStore((s) => s.researchId);
 
   useEffect(() => {
     if (previewUrl) setActiveTab("preview");
@@ -101,11 +103,15 @@ export function CodeWorkspace() {
             {tab.label}
           </button>
         ))}
-        {activeFile && (
+        {activeTab === "preview" && previewUrl && researchId != null ? (
+          <div className="ml-auto mr-4">
+            <VercelDeployButton researchId={researchId} />
+          </div>
+        ) : activeFile ? (
           <span className="ml-auto mr-4 text-[10px] text-[var(--color-text-muted)] truncate max-w-[200px]">
             {activeFile.path}
           </span>
-        )}
+        ) : null}
         {buildStatus === "building" && (
           <div className="flex items-center gap-1.5 mr-4 text-xs text-[var(--color-neon-violet)]">
             <Loader2 size={12} className="animate-spin" />

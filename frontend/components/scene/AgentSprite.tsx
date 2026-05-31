@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { Text, Billboard } from "@react-three/drei";
 import * as THREE from "three";
-import { ROLES, type RoleId } from "@/lib/roles";
+import { getRole, type RoleId } from "@/lib/roles";
 import type { RunPhase } from "@/lib/store/agents";
 import { SpeechBubble } from "./SpeechBubble";
 
@@ -52,7 +52,7 @@ export function AgentSprite({
   const ringRef = useRef<THREE.Mesh>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
   const phaseOffset = useMemo(() => hashPhase(id), [id]);
-  const role = ROLES[roleId];
+  const role = getRole(roleId);
 
   useFrame((state, dt) => {
     const g = groupRef.current;

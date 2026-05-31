@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { ROLES, type OfficeType, type RoleId } from "@/lib/roles";
+import { ROLES, getRole, isKnownRole, type OfficeType, type RoleId } from "@/lib/roles";
 
 export interface Office {
   id: string;
@@ -121,7 +121,7 @@ export const useAgentStore = create<AgentStore>()(
           const existing = s.agents.filter(
             (a) => a.officeId === office.id && a.roleId === roleId,
           ).length;
-          const base = ROLES[roleId].name;
+          const base = getRole(roleId).name;
           const name = existing === 0 ? base : `${base} ${existing + 1}`;
           const agent: Agent = {
             id: makeId(),
@@ -171,6 +171,11 @@ export const useAgentStore = create<AgentStore>()(
         agents: s.agents,
         activeOfficeId: s.activeOfficeId,
       }),
+      merge: (persisted, current) => {
+        const state = { ...current, ...(persisted as Partial<AgentStore>) };
+        state.agents = state.agents.filter((a) => isKnownRole(a.roleId));
+        return state;
+      },
     },
   ),
 );
