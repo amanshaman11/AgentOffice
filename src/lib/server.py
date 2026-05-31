@@ -126,7 +126,10 @@ async def _persist_result(query: str, result: OrchestrationResult, execution_tim
                 import time
                 file_path = f"research/{research_id}_{int(time.time())}.pdf"
                 pdf_url = await upload_pdf(file_path, pdf_data)
-                print(f"PDF uploaded to Supabase: {pdf_url}")
+                if pdf_url:
+                    print(f"PDF uploaded to Supabase: {pdf_url}")
+                else:
+                    print("PDF upload skipped (storage bucket unavailable or empty)")
             except Exception as pdf_error:
                 print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
             
@@ -253,7 +256,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                     
                     file_path = f"research/{research_id}_{int(time.time())}.pdf"
                     pdf_url = await upload_pdf(file_path, pdf_data)
-                    print(f"PDF uploaded to Supabase: {pdf_url}")
+                    if pdf_url:
+                        print(f"PDF uploaded to Supabase: {pdf_url}")
+                    else:
+                        print("PDF upload skipped (storage bucket unavailable or empty)")
                 except Exception as pdf_error:
                     print(f"Warning: Failed to generate/upload PDF: {pdf_error}")
                 
@@ -343,11 +349,8 @@ async def export_pdf(research_id: int) -> Response:
 
         pdf_url = None
         if is_supabase_configured():
-            try:
-                file_path = f"research/{research_id}_{int(time.time())}.pdf"
-                pdf_url = await upload_pdf(file_path, pdf_data)
-            except Exception as error:
-                print(f"Warning: Failed to upload PDF to Supabase: {error}")
+            file_path = f"research/{research_id}_{int(time.time())}.pdf"
+            pdf_url = await upload_pdf(file_path, pdf_data)
 
         return Response(
             content=pdf_data,

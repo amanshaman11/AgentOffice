@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Download, Search, Calendar, Clock, ExternalLink } from "lucide-react";
-import { fetchDocuments, searchDocuments, type ResearchDocument } from "@/lib/supabase";
+import { FileText, Search, Calendar, Clock, ExternalLink } from "lucide-react";
+import {
+  fetchDocuments,
+  getDocumentPdfUrl,
+  searchDocuments,
+  type ResearchDocument,
+} from "@/lib/supabase";
 import clsx from "clsx";
 
 export function Library() {
@@ -52,12 +57,15 @@ export function Library() {
     return `${minutes}m ${seconds % 60}s`;
   };
 
-  const downloadPDF = async (doc: ResearchDocument) => {
-    if (doc.pdf_url) {
-      window.open(doc.pdf_url, "_blank");
-    } else {
-      console.warn("No PDF URL available for this document");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const openDocument = (doc: ResearchDocument) => {
+    const url = getDocumentPdfUrl(doc);
+    if (url) {
+      window.open(url, "_blank");
+      return;
     }
+    setExpandedId(doc.id);
   };
 
   return (
@@ -104,7 +112,12 @@ export function Library() {
               <DocumentCard
                 key={doc.id}
                 doc={doc}
-                onDownload={() => downloadPDF(doc)}
+                onOpen={() => openDocument(doc)}
+                pdfAvailable={Boolean(getDocumentPdfUrl(doc))}
+                expanded={expandedId === doc.id}
+                onToggleExpanded={() =>
+                  setExpandedId((current) => (current === doc.id ? null : doc.id))
+                }
                 formatDate={formatDate}
                 formatTime={formatTime}
               />
@@ -118,13 +131,23 @@ export function Library() {
 
 interface DocumentCardProps {
   doc: ResearchDocument;
-  onDownload: () => void;
+  onOpen: () => void;
+  pdfAvailable: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   formatDate: (date: string) => string;
   formatTime: (ms: number) => string;
 }
 
-function DocumentCard({ doc, onDownload, formatDate, formatTime }: DocumentCardProps) {
-  const [expanded, setExpanded] = useState(false);
+function DocumentCard({
+  doc,
+  onOpen,
+  pdfAvailable,
+  expanded,
+  onToggleExpanded,
+  formatDate,
+  formatTime,
+}: DocumentCardProps) {
 
   return (
     <div className="bg-[var(--color-bg-2)] border border-[var(--color-stroke)] rounded-lg p-3 hover:border-[var(--color-neon-violet)] hover:border-opacity-50 transition group">
@@ -139,11 +162,11 @@ function DocumentCard({ doc, onDownload, formatDate, formatTime }: DocumentCardP
         </div>
         
         <button
-          onClick={onDownload}
+          onClick={onOpen}
           className="flex-none p-1.5 rounded hover:bg-[var(--color-bg-3)] text-[var(--color-text-muted)] hover:text-[var(--color-neon-violet)] transition"
-          title="View PDF"
+          title={pdfAvailable ? "View PDF" : "View summary"}
         >
-          <ExternalLink size={16} />
+          {pdfAvailable ? <ExternalLink size={16} /> : <FileText size={16} />}
         </button>
       </div>
 
@@ -167,7 +190,7 @@ function DocumentCard({ doc, onDownload, formatDate, formatTime }: DocumentCardP
       )}
 
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={onToggleExpanded}
         className="text-xs text-[var(--color-neon-violet)] hover:underline mt-2"
       >
         {expanded ? "Show less" : "Show more"}

@@ -30,38 +30,46 @@ def get_supabase_client() -> Client:
     return create_client(url, key)
 
 
-async def upload_pdf(file_path: str, pdf_data: bytes, bucket: str = "research-pdfs") -> str:
+def _is_bucket_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(
+        token in message
+        for token in ("bucket not found", "not found", "does not exist", "404")
+    )
+
+
+async def upload_pdf(
+    file_path: str, pdf_data: bytes, bucket: str = "research-pdfs"
+) -> str | None:
     """
     Upload PDF to Supabase Storage and return public URL.
-    
-    Args:
-        file_path: Destination path in storage (e.g., 'research/report_123.pdf')
-        pdf_data: PDF file content as bytes
-        bucket: Storage bucket name
-    
-    Returns:
-        Public URL to access the uploaded file
-    
-    Raises:
-        SupabaseError: If upload fails
+
+    Returns None when the bucket is missing, empty, or upload otherwise fails.
     """
+    if not is_supabase_configured():
+        return None
+
     try:
         client = get_supabase_client()
-        
+
         response = client.storage.from_(bucket).upload(
             file_path,
             pdf_data,
-            file_options={"content-type": "application/pdf"}
+            file_options={"content-type": "application/pdf", "upsert": "true"},
         )
-        
-        if hasattr(response, 'error') and response.error:
-            raise SupabaseError(f"Upload failed: {response.error}")
-        
-        public_url = client.storage.from_(bucket).get_public_url(file_path)
-        return public_url
-    
+
+        if hasattr(response, "error") and response.error:
+            print(f"Warning: PDF upload failed for bucket '{bucket}': {response.error}")
+            return None
+
+        return client.storage.from_(bucket).get_public_url(file_path)
+
     except Exception as error:
-        raise SupabaseError(f"Failed to upload PDF: {error}") from error
+        if _is_bucket_error(error):
+            print(f"Warning: Storage bucket '{bucket}' unavailable, skipping PDF upload")
+        else:
+            print(f"Warning: Failed to upload PDF: {error}")
+        return None
 
 
 async def delete_pdf(file_path: str, bucket: str = "research-pdfs") -> None:
