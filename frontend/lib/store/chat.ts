@@ -2,7 +2,8 @@
 
 import { create } from "zustand";
 import { runQueryAndAnimate } from "@/lib/runner";
-import { getPlan } from "@/lib/api";
+import { suggestWorkflow as apiSuggest, type RunPayload } from "@/lib/api";
+import { useAgentStore } from "@/lib/store/agents";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -11,13 +12,14 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   ts: number;
+  suggestedAgents?: string[];
 }
 
 interface ChatStore {
   messages: ChatMessage[];
   pending: boolean;
   sendMessage: (text: string) => Promise<void>;
-  previewPlan: (text: string) => Promise<void>;
+  suggestWorkflow: (text: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -25,11 +27,6 @@ const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
-
-const formatPlan = (steps: { step: number; agent: string; required: boolean }[]) =>
-  steps
-    .map((s) => `${s.step}. ${s.agent}${s.required ? "" : " (optional)"}`)
-    .join("\n");
 
 export const useChatStore = create<ChatStore>((set) => ({
   messages: [],
@@ -72,36 +69,46 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => ({ messages: [...s.messages, assistant], pending: false }));
   },
 
-  previewPlan: async (text) => {
+  suggestWorkflow: async (text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
 
     const user: ChatMessage = {
       id: makeId(),
       role: "user",
-      text: `Preview plan: ${trimmed}`,
+      text: `Suggest workflow: ${trimmed}`,
       ts: Date.now(),
     };
     set((s) => ({ messages: [...s.messages, user], pending: true }));
 
     try {
-      const plan = await getPlan(trimmed);
-      const body = [
-        `Goal: ${plan.goal}`,
-        "",
-        formatPlan(plan.steps),
-        plan.fallback_rules.length
-          ? "\nFallback rules:\n" +
-            plan.fallback_rules.map((r) => `· ${r}`).join("\n")
-          : "",
-      ]
-        .filter(Boolean)
+      const agentStore = useAgentStore.getState();
+      const activeOffice = agentStore.offices.find(
+        (o) => o.id === agentStore.activeOfficeId,
+      );
+      const officeType =
+        (activeOffice?.type ?? "research") as RunPayload["office_type"];
+
+      const suggestion = await apiSuggest(trimmed, officeType);
+
+      const agentLines = suggestion.suggested_agents
+        .map((a, i) => `${i + 1}. ${a}`)
         .join("\n");
+
+      const body = [
+        "Suggested workflow:",
+        "",
+        agentLines,
+        "",
+        suggestion.rationale,
+      ].join("\n");
+
       const assistant: ChatMessage = {
         id: makeId(),
         role: "assistant",
         text: body,
         ts: Date.now(),
+        suggestedAgents: suggestion.suggested_agents,
       };
       set((s) => ({ messages: [...s.messages, assistant], pending: false }));
     } catch (err) {

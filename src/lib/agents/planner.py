@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from .gemini_client import GeminiError, generate_json
 from .schemas import Plan, PlanStep
 
 DEFAULT_AGENT_SEQUENCE = ("searcher", "analyzer", "summarizer", "sender")
+RESEARCH_ROLES = frozenset(DEFAULT_AGENT_SEQUENCE)
 
 
 def default_plan(goal: str) -> Plan:
@@ -23,8 +26,70 @@ def default_plan(goal: str) -> Plan:
     )
 
 
+def plan_from_roster(goal: str, agents: list[str]) -> Plan:
+    """Build a linear execution plan from an ordered agent roster.
+
+    Each roster entry becomes one step, depending only on the previous step.
+    The last step is optional when it is the ``sender`` role.
+
+    Raises ``ValueError`` for empty rosters or agents not in ``RESEARCH_ROLES``.
+    """
+
+    if not agents:
+        raise ValueError("Roster is empty — add at least one agent to the office.")
+    unknown = [a for a in agents if a not in RESEARCH_ROLES]
+    if unknown:
+        raise ValueError(
+            f"Unknown research agents: {', '.join(unknown)}. "
+            f"Valid agents are: {', '.join(sorted(RESEARCH_ROLES))}."
+        )
+
+    steps = [
+        PlanStep(
+            step=i,
+            agent=role,
+            depends_on=[i - 1] if i > 1 else [],
+            required=not (role == "sender" and i == len(agents)),
+        )
+        for i, role in enumerate(agents, start=1)
+    ]
+
+    fallback_rules: list[str] = []
+    roles_set = set(agents)
+    if "analyzer" in roles_set and "searcher" in roles_set:
+        fallback_rules.append("if analyzer fails, retry searcher max 2 times")
+
+    return Plan(goal=goal, steps=steps, fallback_rules=fallback_rules)
+
+
+class WorkflowSuggestion(BaseModel):
+    """Gemini's recommendation for which research agents to run."""
+
+    suggested_agents: list[str]
+    rationale: str
+
+
+def suggest_workflow(query: str) -> WorkflowSuggestion:
+    """Use Gemini to recommend an ordered research workflow for ``query``.
+
+    Returns a suggestion only — never executes any agents.
+    """
+
+    system_instruction = (
+        "You are the planning lead of a multi-agent research office. "
+        "Given a user request, recommend an ordered list of research agents to run. "
+        f"Available agents: {', '.join(DEFAULT_AGENT_SEQUENCE)}. "
+        "The searcher gathers sources, the analyzer validates source quality, "
+        "the summarizer writes a concise summary, and the sender formats citations. "
+        "Return only agents from the available list in recommended execution order. "
+        "Include a brief rationale (1-2 sentences) explaining your choice."
+    )
+    prompt = f"User request:\n{query}\n\nSuggest the optimal research workflow."
+    return generate_json(prompt, WorkflowSuggestion, system_instruction=system_instruction)
+
+
 class Planner:
-    """Generates an execution :class:`Plan` from a research query or SaaS idea."""
+    """Generates an execution :class:`Plan` from a research query."""
 
     system_instruction = (
         "You are the planning lead of a multi-agent research office. Given a user "

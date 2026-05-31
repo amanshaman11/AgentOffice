@@ -9,10 +9,10 @@ from typing import Callable
 from pydantic import BaseModel
 
 from .base import BaseAgent
-from .filter import get_next_step, should_retry, validate_step
+from .filter import build_step_context, get_next_step, should_retry, validate_step
 from .planner import Planner
 from .research import build_research_agents
-from .schemas import AgentResult, Plan
+from .schemas import AgentResult, Plan, PlanStep
 
 _SKIPPED_MARKER = "[skipped: optional step]"
 
@@ -23,22 +23,32 @@ class OrchestrationResult(BaseModel):
     goal: str
     plan: Plan
     success: bool
-    outputs: dict[str, AgentResult]
+    outputs: dict[str, AgentResult]  # keys are step numbers as strings ("1", "2", …)
     final_output: str
     log: list[str]
 
 
-def _reroute_target(plan: Plan, failed_agent: str) -> str | None:
-    """Find the agent a fallback rule says to retry when ``failed_agent`` fails."""
+def _reroute_target_step(plan: Plan, failed_step: PlanStep) -> int | None:
+    """Find the step number to re-route to when ``failed_step`` fails.
 
-    known = {s.agent for s in plan.steps}
+    Reads fallback rules such as "if analyzer fails, retry searcher max 2 times"
+    and returns the most recent prior step whose role matches the retry target.
+    """
+
     for rule in plan.fallback_rules:
         lowered = rule.lower()
-        if failed_agent.lower() not in lowered:
+        if failed_step.agent.lower() not in lowered:
             continue
         match = re.search(r"retry\s+([a-z_]+)", lowered)
-        if match and match.group(1) in known:
-            return match.group(1)
+        if not match:
+            continue
+        target_role = match.group(1)
+        prior = [
+            s for s in plan.steps
+            if s.agent == target_role and s.step < failed_step.step
+        ]
+        if prior:
+            return max(prior, key=lambda s: s.step).step
     return None
 
 
@@ -57,10 +67,15 @@ class Orchestrator:
         self.agents = agents or build_research_agents(model=model)
         self.approve = approve or (lambda _plan: True)
 
-    def run(self, query: str) -> OrchestrationResult:
-        """Execute the full pipeline for ``query`` and return the aggregated result."""
+    def run(self, query: str, *, plan: Plan | None = None) -> OrchestrationResult:
+        """Execute the pipeline for ``query`` and return the aggregated result.
 
-        plan = self.planner.create_plan(query)
+        If ``plan`` is provided it is used as-is (roster-driven mode). Otherwise
+        the planner generates one from the query.
+        """
+
+        if plan is None:
+            plan = self.planner.create_plan(query)
         log: list[str] = [f"Planned {len(plan.steps)} steps for goal: {plan.goal}"]
 
         if not self.approve(plan):
@@ -73,12 +88,12 @@ class Orchestrator:
                 log=log + ["Plan was not approved."],
             )
 
-        outputs: dict[str, AgentResult] = {}
-        attempts: dict[str, int] = defaultdict(int)
+        outputs: dict[int, AgentResult] = {}
+        attempts: dict[int, int] = defaultdict(int)
         max_iterations = sum(2 + s.step for s in plan.steps) + len(plan.steps) * 2
 
         for _ in range(max_iterations):
-            step = get_next_step(0, plan, outputs)
+            step = get_next_step(plan, outputs)
             if step is None:
                 break
 
@@ -87,39 +102,42 @@ class Orchestrator:
                 log.append(f"No agent registered for '{step.agent}'.")
                 if step.required:
                     return self._finalize(plan, outputs, log, success=False)
-                outputs[step.agent] = AgentResult(
+                outputs[step.step] = AgentResult(
                     agent=step.agent, success=True, output=_SKIPPED_MARKER
                 )
                 continue
 
-            attempts[step.agent] += 1
-            result = agent.run(query, context=outputs)
+            attempts[step.step] += 1
+            context = build_step_context(step, plan, outputs)
+            result = agent.run(query, context=context)
             validation = validate_step(result, plan, step)
 
             if validation.valid:
-                outputs[step.agent] = result
+                outputs[step.step] = result
                 log.append(f"Step {step.step} '{step.agent}' succeeded.")
                 continue
 
             log.append(
                 f"Step {step.step} '{step.agent}' failed (attempt "
-                f"{attempts[step.agent]}): {validation.reason}"
+                f"{attempts[step.step]}): {validation.reason}"
             )
 
-            if should_retry(validation.reason, step.agent, plan, attempts[step.agent]):
-                outputs.pop(step.agent, None)
-                target = _reroute_target(plan, step.agent)
-                if target and target != step.agent:
-                    outputs.pop(target, None)
-                    attempts[target] = 0
-                    log.append(f"Re-routing to '{target}' per fallback rules.")
+            if should_retry(validation.reason, step.agent, plan, attempts[step.step]):
+                outputs.pop(step.step, None)
+                target_step_num = _reroute_target_step(plan, step)
+                if target_step_num is not None and target_step_num != step.step:
+                    target_plan_step = plan.step_by_number(target_step_num)
+                    outputs.pop(target_step_num, None)
+                    attempts[target_step_num] = 0
+                    role_name = target_plan_step.agent if target_plan_step else "agent"
+                    log.append(f"Re-routing to '{role_name}' per fallback rules.")
                 continue
 
             if step.required:
                 log.append(f"Required step '{step.agent}' exhausted retries. Aborting.")
                 return self._finalize(plan, outputs, log, success=False)
 
-            outputs[step.agent] = AgentResult(
+            outputs[step.step] = AgentResult(
                 agent=step.agent, success=True, output=_SKIPPED_MARKER
             )
             log.append(f"Optional step '{step.agent}' skipped.")
@@ -127,7 +145,7 @@ class Orchestrator:
             log.append("Reached iteration limit; stopping.")
 
         success = all(
-            (r := outputs.get(s.agent)) is not None
+            (r := outputs.get(s.step)) is not None
             and r.success
             and r.output != _SKIPPED_MARKER
             for s in plan.steps
@@ -137,19 +155,34 @@ class Orchestrator:
 
     @staticmethod
     def _finalize(
-        plan: Plan, outputs: dict[str, AgentResult], log: list[str], *, success: bool
+        plan: Plan,
+        outputs: dict[int, AgentResult],
+        log: list[str],
+        *,
+        success: bool,
     ) -> OrchestrationResult:
         final_output = ""
-        for agent in ("sender", "summarizer"):
-            result = outputs.get(agent)
-            if result and result.success and result.output != _SKIPPED_MARKER:
-                final_output = result.output
+        for role in ("sender", "summarizer"):
+            for step in reversed(plan.steps):
+                if step.agent == role:
+                    r = outputs.get(step.step)
+                    if r and r.success and r.output != _SKIPPED_MARKER:
+                        final_output = r.output
+                        break
+            if final_output:
                 break
+        if not final_output:
+            for step in reversed(plan.steps):
+                r = outputs.get(step.step)
+                if r and r.success and r.output != _SKIPPED_MARKER:
+                    final_output = r.output
+                    break
+
         return OrchestrationResult(
             goal=plan.goal,
             plan=plan,
             success=success,
-            outputs=outputs,
+            outputs={str(step_num): result for step_num, result in outputs.items()},
             final_output=final_output,
             log=log,
         )
