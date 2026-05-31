@@ -19,7 +19,9 @@ export function BackendStatus() {
       try {
         const h = await getHealth();
         if (cancelled) return;
-        setStatus(h.gemini_key === "set" ? "ok" : "no-key");
+        setStatus(
+          h.gemini_key === "set" && h.openai_key === "set" ? "ok" : "no-key",
+        );
       } catch {
         if (cancelled) return;
         setStatus("offline");
@@ -36,10 +38,10 @@ export function BackendStatus() {
 
   const palette: Record<Status, { color: string; label: string }> = {
     checking: { color: "var(--color-text-dim)", label: "Checking backend…" },
-    ok: { color: "var(--color-neon-green)", label: "Backend connected · Gemini ready" },
+    ok: { color: "var(--color-neon-green)", label: "Backend connected · APIs ready" },
     "no-key": {
       color: "var(--color-neon-amber)",
-      label: "Backend up · GEMINI_API_KEY missing",
+      label: "Backend up · API key missing (Gemini and/or OpenAI)",
     },
     offline: {
       color: "var(--color-neon-pink)",

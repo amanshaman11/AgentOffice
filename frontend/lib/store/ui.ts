@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type LeftView = "offices" | "chat" | "library" | null;
+export type LeftView = "offices" | "chat" | "library" | "code" | null;
 
 interface UiStore {
   activeLeft: LeftView;

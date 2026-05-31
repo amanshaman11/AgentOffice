@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from src.lib.agents.developer.deployer import DeployerAgent
 from src.lib.agents.developer.marketing import MarketingAgent
 from src.lib.agents.developer.schemas import MarketingAssets, SocialPost
+from src.lib.agents.developer.editor import EditorAgent
 from src.lib.agents.developer.executor import ExecutorAgent
 from src.lib.agents.developer.planner_agent import DeveloperPlannerAgent
 from src.lib.agents.developer.qa import QAAgent
@@ -49,9 +50,20 @@ def _dev_plan_json() -> str:
 
 def _executor_json() -> str:
     return ExecutorOutput(
-        files=[CodeFile(path="app/page.tsx", content="export default function Page() {}", language="tsx")],
-        dependencies=["next"],
-        setup_instructions="npm install && npm run dev",
+        files=[
+            CodeFile(
+                path="index.html",
+                content='<html><body><script src="./app.js"></script></body></html>',
+                language="html",
+            ),
+            CodeFile(
+                path="app.js",
+                content='document.addEventListener("DOMContentLoaded", () => { console.log("ok"); });',
+                language="js",
+            ),
+        ],
+        dependencies=[],
+        setup_instructions="Open index.html in a browser.",
     ).model_dump_json()
 
 
@@ -59,7 +71,7 @@ class PlanFromRosterTests(unittest.TestCase):
     def test_accepts_developer_roles(self) -> None:
         plan = plan_from_roster("Build a todo app", list(DEVELOPER_AGENT_SEQUENCE), "developer")
         self.assertEqual([s.agent for s in plan.steps], list(DEVELOPER_AGENT_SEQUENCE))
-        self.assertIn("if qa fails, retry executor max 3 times", plan.fallback_rules)
+        self.assertIn("if qa fails, retry executor max 5 times", plan.fallback_rules)
 
     def test_rejects_unknown_developer_agent(self) -> None:
         with self.assertRaises(ValueError):
@@ -88,8 +100,10 @@ class ProjectPackagerTests(unittest.TestCase):
     def test_extract_executor_files(self) -> None:
         payload = _executor_json()
         extracted = extract_executor_files(payload)
-        self.assertEqual(len(extracted), 1)
-        self.assertEqual(extracted[0].path, "app/page.tsx")
+        self.assertEqual(len(extracted), 2)
+        paths = {f.path for f in extracted}
+        self.assertIn("index.html", paths)
+        self.assertIn("app.js", paths)
 
     def test_extract_executor_files_invalid_json(self) -> None:
         self.assertEqual(extract_executor_files("not json"), [])
@@ -135,7 +149,7 @@ class DeveloperAgentTests(unittest.TestCase):
             "qa": AgentResult(agent="qa", success=False, feedback="Missing error handling"),
         }
         with patch("src.lib.agents.developer.executor.generate_json", return_value=output) as mock_gen:
-            ExecutorAgent().run("Build a todo app", context=context)
+            ExecutorAgent(model="gpt-5.4-mini").run("Build a todo app", context=context)
         self.assertIn("Missing error handling", mock_gen.call_args[0][0])
 
     def test_qa_pass(self) -> None:
@@ -355,6 +369,191 @@ class RegistryTests(unittest.TestCase):
             set(agents.keys()),
             {"planner", "executor", "qa", "deployer", "marketing"},
         )
+        self.assertEqual(agents["executor"].model, "gpt-5.4-mini")
+
+
+class CodeValidatorTests(unittest.TestCase):
+    from src.lib.code_validator import CodeFile as _VCodeFile
+    from src.lib.code_validator import validate_files as _validate
+
+    def _file(self, path: str, content: str) -> CodeFile:
+        return CodeFile(path=path, content=content, language="")
+
+    def _validate(self, files: list[CodeFile]):
+        from src.lib.code_validator import validate_files
+        return validate_files(files)
+
+    def test_valid_static_project_passes(self) -> None:
+        files = [
+            self._file("index.html", '<html><body><script src="./app.js"></script></body></html>'),
+            self._file("app.js", 'document.addEventListener("DOMContentLoaded", () => { console.log("ok"); });'),
+            self._file("styles.css", "body { margin: 0; }"),
+        ]
+        issues = self._validate(files)
+        blockers = [i for i in issues if i.severity in {"blocker", "major"}]
+        self.assertEqual(blockers, [], msg=f"Unexpected blockers: {blockers}")
+
+    def test_python_syntax_error_caught(self) -> None:
+        files = [
+            self._file("index.html", "<html></html>"),
+            self._file("app.py", "def broken(\n    print('oops')\n"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity == "blocker" and "syntax" in i.message.lower() for i in issues),
+            f"Expected syntax blocker, got: {issues}",
+        )
+
+    def test_missing_relative_import_caught(self) -> None:
+        files = [
+            self._file("index.html", '<html><script src="./app.js"></script></html>'),
+            self._file("app.js", "import { helper } from './missing_module.js';"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity == "blocker" and "missing_module" in i.message for i in issues),
+            f"Expected broken import blocker, got: {issues}",
+        )
+
+    def test_missing_script_src_in_html_caught(self) -> None:
+        files = [
+            self._file("index.html", '<html><script src="./does_not_exist.js"></script></html>'),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity == "blocker" and "does_not_exist" in i.message for i in issues),
+        )
+
+    def test_missing_entry_point_is_blocker(self) -> None:
+        files = [
+            self._file("app.js", "console.log('hi');"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity == "blocker" and "entry" in i.message.lower() for i in issues),
+            f"Expected entry-point blocker, got: {issues}",
+        )
+
+    def test_placeholder_content_caught(self) -> None:
+        files = [
+            self._file("index.html", "<html></html>"),
+            self._file("app.js", "// TODO: implement all the things"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity == "blocker" and "placeholder" in i.message.lower() for i in issues),
+        )
+
+    def test_invalid_json_caught(self) -> None:
+        files = [
+            self._file("index.html", "<html></html>"),
+            self._file("package.json", "{invalid json"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(any(i.severity == "blocker" and i.file == "package.json" for i in issues))
+
+    def test_unbalanced_braces_caught(self) -> None:
+        files = [
+            self._file("index.html", "<html><script src='./app.js'></script></html>"),
+            self._file("app.js", "function broken() { if (true) { console.log('oops');"),
+        ]
+        issues = self._validate(files)
+        self.assertTrue(
+            any(i.severity in {"major", "blocker"} and "brace" in i.message.lower() for i in issues),
+        )
+
+
+class QAStaticValidationTests(unittest.TestCase):
+    def _executor_output_with_files(self, files: list[CodeFile]) -> str:
+        return ExecutorOutput(files=files, dependencies=[], setup_instructions="").model_dump_json()
+
+    def test_qa_fails_on_static_blocker_regardless_of_llm(self) -> None:
+        broken_output = self._executor_output_with_files([
+            CodeFile(path="app.js", content="console.log('no index.html');", language="js"),
+        ])
+        context = {
+            "planner": AgentResult(agent="planner", success=True, output=_dev_plan_json()),
+            "executor": AgentResult(agent="executor", success=True, output=broken_output),
+        }
+        result = QAAgent().run("Build a todo app", context=context)
+        self.assertFalse(result.success, "QA should fail when entry-point is missing")
+        self.assertIn("entry", result.feedback.lower())
+
+    def test_qa_does_not_call_llm_when_static_blocker_found(self) -> None:
+        broken_output = self._executor_output_with_files([
+            CodeFile(path="app.js", content="console.log('no html');", language="js"),
+        ])
+        context = {
+            "planner": AgentResult(agent="planner", success=True, output=_dev_plan_json()),
+            "executor": AgentResult(agent="executor", success=True, output=broken_output),
+        }
+        with patch("src.lib.agents.developer.qa.generate_json") as mock_llm:
+            QAAgent().run("Build a todo app", context=context)
+        mock_llm.assert_not_called()
+
+    def test_qa_passes_valid_static_project(self) -> None:
+        good_output = self._executor_output_with_files([
+            CodeFile(path="index.html", content='<html><body><script src="./app.js"></script></body></html>', language="html"),
+            CodeFile(path="app.js", content='document.addEventListener("DOMContentLoaded", () => { console.log("ok"); });', language="js"),
+        ])
+        report = QAReport(passed=True, issues=[], summary="Looks good")
+        context = {
+            "planner": AgentResult(agent="planner", success=True, output=_dev_plan_json()),
+            "executor": AgentResult(agent="executor", success=True, output=good_output),
+        }
+        with patch("src.lib.agents.developer.qa.generate_json", return_value=report):
+            result = QAAgent().run("Build a todo app", context=context)
+        self.assertTrue(result.success)
+
+
+class EditorValidationTests(unittest.TestCase):
+    def _good_files(self) -> list[dict]:
+        return [
+            {"path": "index.html", "content": '<html><script src="./app.js"></script></html>', "language": "html"},
+            {"path": "app.js", "content": 'console.log("hi");', "language": "js"},
+        ]
+
+    def _broken_output(self) -> ExecutorOutput:
+        return ExecutorOutput(
+            files=[CodeFile(path="app.js", content="console.log('no html');", language="js")],
+            dependencies=[],
+            setup_instructions="",
+        )
+
+    def _good_output(self) -> ExecutorOutput:
+        return ExecutorOutput(
+            files=[
+                CodeFile(path="index.html", content='<html><script src="./app.js"></script></html>', language="html"),
+                CodeFile(path="app.js", content='console.log("ok");', language="js"),
+            ],
+            dependencies=[],
+            setup_instructions="",
+        )
+
+    def test_editor_rejects_result_with_blocker(self) -> None:
+        with patch("src.lib.agents.developer.editor.generate_json", return_value=self._broken_output()):
+            result = EditorAgent().run_edit("add feature", self._good_files(), allow_retry=False)
+        self.assertFalse(result.success)
+        self.assertIn("entry", result.feedback.lower())
+
+    def test_editor_retries_once_and_succeeds(self) -> None:
+        call_count = {"n": 0}
+        broken = self._broken_output()
+        good = self._good_output()
+
+        def side_effect(*args, **kwargs):
+            call_count["n"] += 1
+            return broken if call_count["n"] == 1 else good
+
+        with patch("src.lib.agents.developer.editor.generate_json", side_effect=side_effect):
+            result = EditorAgent().run_edit("add feature", self._good_files())
+        self.assertTrue(result.success)
+        self.assertEqual(call_count["n"], 2)
+
+    def test_editor_fails_if_both_attempts_broken(self) -> None:
+        with patch("src.lib.agents.developer.editor.generate_json", return_value=self._broken_output()):
+            result = EditorAgent().run_edit("add feature", self._good_files())
+        self.assertFalse(result.success)
 
 
 if __name__ == "__main__":

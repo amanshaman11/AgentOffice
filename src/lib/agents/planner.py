@@ -47,13 +47,13 @@ def default_developer_plan(goal: str) -> Plan:
             PlanStep(step=4, agent="deployer", depends_on=[3], required=True),
             PlanStep(step=5, agent="marketing", depends_on=[4], required=False),
         ],
-        fallback_rules=["if qa fails, retry executor max 3 times"],
+        fallback_rules=["if qa fails, retry executor max 5 times"],
     )
 
 
 def _roster_fallback_rules(roles: set[str], office_type: str) -> list[str]:
     if office_type == "developer" and {"qa", "executor"} <= roles:
-        return ["if qa fails, retry executor max 3 times"]
+        return ["if qa fails, retry executor max 5 times"]
     if office_type == "research" and {"analyzer", "searcher"} <= roles:
         return ["if analyzer fails, retry searcher max 2 times"]
     return []

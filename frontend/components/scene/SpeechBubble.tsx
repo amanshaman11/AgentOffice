@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text, Billboard, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
@@ -11,7 +11,11 @@ interface SpeechBubbleProps {
   visible: boolean;
 }
 
-const MAX_CHARS = 60;
+const MAX_CHARS = 72;
+const LINGER_SECONDS = 3.5;
+const FADE_SECONDS = 1;
+
+type BubblePhase = "hidden" | "show" | "linger" | "fade";
 
 function truncateMessage(text: string): string {
   const trimmed = text.trim();
@@ -21,78 +25,147 @@ function truncateMessage(text: string): string {
 
 export function SpeechBubble({ message, color, visible }: SpeechBubbleProps) {
   const groupRef = useRef<THREE.Group>(null);
+  const contentRef = useRef<THREE.Group>(null);
+  const boxMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const tailMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const rimMatRef = useRef<THREE.MeshBasicMaterial>(null);
+
   const scaleRef = useRef(0);
   const opacityRef = useRef(0);
-  const displayText = truncateMessage(message);
+  const phaseRef = useRef<BubblePhase>("hidden");
+  const timerRef = useRef(0);
+
+  const [text, setText] = useState("");
+
+  useEffect(() => {
+    const trimmed = truncateMessage(message);
+
+    if (visible && trimmed) {
+      setText(trimmed);
+      phaseRef.current = "show";
+      timerRef.current = 0;
+      return;
+    }
+
+    if (text && phaseRef.current === "show") {
+      phaseRef.current = "linger";
+      timerRef.current = 0;
+    }
+  }, [visible, message, text]);
 
   useFrame((state, dt) => {
     const group = groupRef.current;
     if (!group) return;
 
-    const targetScale = visible && displayText ? 1 : 0;
-    const targetOpacity = visible && displayText ? 1 : 0;
-    const speed = visible ? 8 : 12;
+    const phase = phaseRef.current;
 
-    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, targetScale, dt * speed);
-    opacityRef.current = THREE.MathUtils.lerp(opacityRef.current, targetOpacity, dt * speed);
+    if (phase === "linger") {
+      timerRef.current += dt;
+      if (timerRef.current >= LINGER_SECONDS) {
+        phaseRef.current = "fade";
+        timerRef.current = 0;
+      }
+    } else if (phase === "fade") {
+      timerRef.current += dt;
+      if (timerRef.current >= FADE_SECONDS) {
+        phaseRef.current = "hidden";
+        timerRef.current = 0;
+        setText("");
+      }
+    }
+
+    let targetOpacity = 0;
+    let targetScale = 0;
+
+    if (phase === "show" || phase === "linger") {
+      targetOpacity = 1;
+      targetScale = 1;
+    } else if (phase === "fade") {
+      const t = timerRef.current / FADE_SECONDS;
+      targetOpacity = 1 - t;
+      targetScale = 1 - t * 0.08;
+    }
+
+    const inSpeed = phase === "show" ? 10 : 6;
+    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, targetScale, dt * inSpeed);
+    opacityRef.current = THREE.MathUtils.lerp(opacityRef.current, targetOpacity, dt * (phase === "fade" ? 5 : inSpeed));
 
     const s = scaleRef.current;
+    const o = opacityRef.current;
     group.scale.setScalar(Math.max(0.001, s));
-    group.visible = s > 0.02;
+    group.visible = s > 0.02 && o > 0.02 && Boolean(text);
 
-    const t = state.clock.elapsedTime;
-    group.position.y = 1.9 + Math.sin(t * 4) * 0.02 * opacityRef.current;
+    if (boxMatRef.current) boxMatRef.current.opacity = 0.98 * o;
+    if (tailMatRef.current) tailMatRef.current.opacity = 0.98 * o;
+    if (rimMatRef.current) rimMatRef.current.opacity = 0.4 * o;
+
+    contentRef.current?.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of mats) {
+        if ("opacity" in mat) {
+          mat.opacity = o;
+          mat.transparent = true;
+        }
+      }
+    });
+
+    const bob = state.clock.elapsedTime;
+    group.position.y = 2.05 + Math.sin(bob * 3.5) * 0.015 * o;
   });
 
-  if (!displayText) return null;
+  if (!text) return null;
 
   return (
     <Billboard
       ref={groupRef}
-      position={[0, 1.9, 0]}
+      position={[0, 2.05, 0]}
       follow
       lockX={false}
       lockY={false}
       lockZ={false}
     >
-      <group>
+      <group ref={contentRef}>
         <RoundedBox
-          args={[1.4, 0.42, 0.04]}
-          radius={0.06}
-          smoothness={2}
-          position={[0, 0.08, 0]}
+          args={[1.85, 0.58, 0.04]}
+          radius={0.08}
+          smoothness={3}
+          position={[0, 0.1, 0]}
         >
           <meshStandardMaterial
-            color="#f4f5ff"
+            ref={boxMatRef}
+            color="#ffffff"
             emissive={color}
-            emissiveIntensity={0.08}
+            emissiveIntensity={0.12}
             transparent
-            opacity={0.96}
+            opacity={0.98}
           />
         </RoundedBox>
 
-        <mesh position={[0, -0.12, 0]} rotation={[0, 0, Math.PI / 4]}>
-          <boxGeometry args={[0.12, 0.12, 0.02]} />
-          <meshStandardMaterial color="#f4f5ff" transparent opacity={0.96} />
+        <mesh position={[0, -0.16, 0]} rotation={[0, 0, Math.PI / 4]}>
+          <boxGeometry args={[0.14, 0.14, 0.02]} />
+          <meshStandardMaterial ref={tailMatRef} color="#ffffff" transparent opacity={0.98} />
         </mesh>
 
-        <mesh position={[0, 0.08, 0.025]}>
-          <boxGeometry args={[1.42, 0.44, 0.01]} />
-          <meshBasicMaterial color={color} transparent opacity={0.35} />
+        <mesh position={[0, 0.1, 0.025]}>
+          <boxGeometry args={[1.88, 0.6, 0.01]} />
+          <meshBasicMaterial ref={rimMatRef} color={color} transparent opacity={0.4} />
         </mesh>
 
         <Text
-          position={[0, 0.08, 0.03]}
-          fontSize={0.09}
-          color="#1a1e36"
+          position={[0, 0.1, 0.03]}
+          fontSize={0.115}
+          color="#0b1020"
           anchorX="center"
           anchorY="middle"
-          maxWidth={1.2}
+          maxWidth={1.55}
+          lineHeight={1.25}
           textAlign="center"
-          outlineColor="#f4f5ff"
-          outlineWidth={0.004}
+          outlineColor="#ffffff"
+          outlineWidth={0.012}
+          fillOpacity={1}
         >
-          {displayText}
+          {text}
         </Text>
       </group>
     </Billboard>

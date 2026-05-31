@@ -17,6 +17,7 @@ interface AgentSpriteProps {
   active: boolean;
   phase: RunPhase;
   message?: string;
+  showBubble?: boolean;
   onSelect: (id: string) => void;
 }
 
@@ -42,6 +43,7 @@ export function AgentSprite({
   active,
   phase,
   message = "",
+  showBubble = false,
   onSelect,
 }: AgentSpriteProps) {
   const groupRef = useRef<THREE.Group>(null);
@@ -262,7 +264,7 @@ export function AgentSprite({
         </mesh>
       </group>
 
-      <SpeechBubble message={message} color={color} visible={speaking} />
+      <SpeechBubble message={message} color={color} visible={showBubble || speaking} />
 
       <Billboard position={[0, 1.7, 0]} follow lockX={false} lockY={false} lockZ={false}>
         <Text

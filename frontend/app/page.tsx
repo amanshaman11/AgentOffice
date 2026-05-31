@@ -6,6 +6,9 @@ import { LeftRail } from "@/components/shell/LeftRail";
 import { LeftSidebarSlot } from "@/components/shell/LeftSidebarSlot";
 import { RightSidebarSlot } from "@/components/shell/RightSidebarSlot";
 import { BottomHud } from "@/components/shell/BottomHud";
+import { CodeWorkspace } from "@/components/shell/CodeWorkspace";
+import { useUiStore } from "@/lib/store/ui";
+import { useCodeStore } from "@/lib/store/code";
 
 const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
   ssr: false,
@@ -17,6 +20,12 @@ const RoomScene = dynamic(() => import("@/components/scene/RoomScene"), {
 });
 
 export default function Home() {
+  const activeLeft = useUiStore((s) => s.activeLeft);
+  const buildStatus = useCodeStore((s) => s.buildStatus);
+  const showWorkspace =
+    activeLeft === "code" &&
+    (buildStatus === "ready" || buildStatus === "error" || buildStatus === "building");
+
   return (
     <div className="h-screen flex flex-col">
       <TopBar />
@@ -24,23 +33,14 @@ export default function Home() {
         <LeftRail />
         <LeftSidebarSlot />
 
-        <main className="flex-1 relative min-w-0 transition-[flex] duration-300 ease-in-out">
-          {/* Tagline overlay */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 text-center pointer-events-none">
-            <div className="text-[10px] tracking-[0.32em] text-[var(--color-text-dim)] uppercase">
-              Build your
-            </div>
-            <div
-              className="text-xl font-semibold tracking-[0.18em] text-[var(--color-neon-violet)]"
-              style={{
-                textShadow: "0 0 14px rgb(138 123 255 / 0.65)",
-              }}
-            >
-              AI WORKFORCE
-            </div>
-          </div>
-
-          <RoomScene />
+        <main className="flex-1 relative min-w-0 transition-[flex] duration-300 ease-in-out flex">
+          {showWorkspace ? (
+            <CodeWorkspace />
+          ) : (
+            <>
+              <RoomScene />
+            </>
+          )}
         </main>
 
         <RightSidebarSlot />

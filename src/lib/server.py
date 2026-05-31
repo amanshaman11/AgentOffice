@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agents import Orchestrator, make_planner
+from .agents.developer import EditorAgent
 from .agents.orchestrator import OrchestrationResult
+from .code_validator import issues_to_feedback, validate_files
 from .project_packager import extract_executor_files
 from .agents.planner import WorkflowSuggestion, plan_from_roster, suggest_workflow
 from .agents.schemas import Plan
@@ -45,6 +49,7 @@ app.add_middleware(
     allow_origins=[o.strip() for o in _origins if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 _history = ResearchHistory()
@@ -196,12 +201,84 @@ async def _persist_result(
     return research_id
 
 
+async def _stream_orchestration_events(
+    query: str,
+    office_type: str,
+    roster: list[str],
+):
+    events: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_progress(step: int, total: int, agent: str, status: str, message: str) -> None:
+        await events.put(
+            {
+                "type": "progress",
+                "step": step,
+                "total_steps": total,
+                "agent": agent,
+                "status": status,
+                "message": message,
+            }
+        )
+
+    async def on_agent_complete(agent: str, output: str, success: bool) -> None:
+        await events.put(
+            {
+                "type": "agent_output",
+                "agent": agent,
+                "output": output,
+                "success": success,
+            }
+        )
+
+    async def run_task() -> None:
+        try:
+            start_time = time.time()
+            plan = plan_from_roster(query, roster, office_type) if roster else None
+            orchestrator = StreamingOrchestrator(office_type=office_type)
+            result, agent_metrics = await orchestrator.run_with_streaming(
+                query,
+                plan=plan,
+                on_progress=on_progress,
+                on_agent_complete=on_agent_complete,
+            )
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            research_id = await _persist_result(
+                query, result, execution_time_ms, office_type=office_type
+            )
+            if research_id:
+                for metric in agent_metrics:
+                    save_agent_metric(research_id=research_id, **metric)
+            await events.put(
+                {
+                    "type": "completion",
+                    "success": result.success,
+                    "final_output": result.final_output,
+                    "research_id": research_id,
+                }
+            )
+        except Exception as error:
+            await events.put({"type": "error", "error": str(error)})
+        finally:
+            await events.put(None)
+
+    task = asyncio.create_task(run_task())
+    try:
+        while True:
+            item = await events.get()
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+    finally:
+        await task
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {
         "status": "ok",
         "version": "2.0.0",
         "gemini_key": "set" if os.getenv("GEMINI_API_KEY") else "missing",
+        "openai_key": "set" if os.getenv("OPENAI_API_KEY") else "missing",
         "supabase": "configured" if is_supabase_configured() else "not_configured",
         "uptime_seconds": _metrics.get_uptime_seconds(),
     }
@@ -257,6 +334,18 @@ async def run(req: RunRequest) -> RunResult:
         office_type=req.office_type,
         artifact_url=artifact_url,
     )
+
+
+@app.post("/api/run/stream")
+async def stream_run(req: RunRequest) -> StreamingResponse:
+    _require_supported_office(req.office_type)
+    query = _clean(req.query)
+
+    async def generate():
+        async for chunk in _stream_orchestration_events(query, req.office_type, req.agents):
+            yield chunk
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @app.post("/api/suggest-workflow", response_model=WorkflowSuggestion)
@@ -439,7 +528,10 @@ def get_project(research_id: int) -> dict:
         raw = output.get("output") or ""
         extracted = extract_executor_files(raw)
         if extracted:
-            files = [{"path": f.path, "language": f.language} for f in extracted]
+            files = [
+                {"path": f.path, "content": f.content, "language": f.language}
+                for f in extracted
+            ]
         try:
             from .agents.developer.schemas import ExecutorOutput
 
@@ -458,6 +550,87 @@ def get_project(research_id: int) -> dict:
         "artifact_url": research.get("artifact_url"),
         "files": files,
         "setup_instructions": setup_instructions,
+    }
+
+
+class EditRequest(BaseModel):
+    instruction: str = Field(..., min_length=1)
+
+
+@app.post("/api/projects/{research_id}/edit")
+async def edit_project(research_id: int, body: EditRequest) -> dict:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if research.get("office_type") != "developer":
+        raise HTTPException(status_code=400, detail="Only developer projects support editing.")
+
+    current_files: list[dict] = []
+    for output in research.get("outputs", {}).values():
+        if not isinstance(output, dict) or output.get("agent") != "executor":
+            continue
+        raw = output.get("output") or ""
+        extracted = extract_executor_files(raw)
+        if extracted:
+            current_files = [
+                {"path": f.path, "content": f.content, "language": f.language}
+                for f in extracted
+            ]
+        break
+
+    if not current_files:
+        raise HTTPException(status_code=422, detail="No source files found for this project.")
+
+    editor = EditorAgent()
+    result = editor.run_edit(instruction=body.instruction, current_files=current_files)
+    if not result.success:
+        raise HTTPException(status_code=422, detail=result.feedback or "Editor failed.")
+
+    from .agents.developer.schemas import ExecutorOutput
+
+    updated_output = ExecutorOutput.model_validate_json(result.output)
+
+    final_issues = validate_files(updated_output.files)
+    hard_blockers = [i for i in final_issues if i.severity == "blocker"]
+    if hard_blockers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Edited project has unresolved issues:\n{issues_to_feedback(hard_blockers)}",
+        )
+    updated_files = [
+        {"path": f.path, "content": f.content, "language": f.language}
+        for f in updated_output.files
+    ]
+
+    import json as _json
+
+    fake_outputs = {"executor": {"agent": "executor", "output": result.output}}
+    new_id = save_research(
+        query=research["query"],
+        goal=f"{research['goal']} [edited: {body.instruction[:80]}]",
+        success=True,
+        final_output=result.output,
+        plan={},
+        outputs=fake_outputs,
+        log=[],
+        execution_time_ms=0,
+        office_type="developer",
+    )
+
+    zip_data = build_project_zip(updated_output)
+    artifact_url = None
+    if is_supabase_configured():
+        zip_path = f"projects/{new_id}_{int(time.time())}.zip"
+        artifact_url = await upload_project_zip(zip_path, zip_data)
+        if artifact_url:
+            update_research_artifact_url(new_id, artifact_url)
+
+    return {
+        "success": True,
+        "research_id": new_id,
+        "files": updated_files,
+        "setup_instructions": updated_output.setup_instructions,
+        "artifact_url": artifact_url,
     }
 
 

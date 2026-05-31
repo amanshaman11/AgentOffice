@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { OfficesPanel } from "@/components/shell/OfficesPanel";
 import { GeminiChat } from "@/components/shell/GeminiChat";
 import { Library } from "@/components/shell/Library";
+import { CodePanel } from "@/components/shell/CodePanel";
 import { useUiStore, type LeftView } from "@/lib/store/ui";
 
 const LEFT_OPEN_WIDTH = 320;
@@ -32,6 +33,7 @@ export function LeftSidebarSlot() {
       {visiblePanel === "offices" && <OfficesPanel />}
       {visiblePanel === "chat" && <GeminiChat />}
       {visiblePanel === "library" && <Library />}
+      {visiblePanel === "code" && <CodePanel />}
     </div>
   );
 }

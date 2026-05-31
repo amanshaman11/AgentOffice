@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FileText, Search, Calendar, Clock, ExternalLink, Package } from "lucide-react";
+import { PreviewProjectButton } from "@/components/shell/PreviewProjectButton";
 import {
   fetchDocuments,
   getDocumentArtifact,
@@ -196,6 +197,12 @@ function DocumentCard({
           {formatTime(doc.execution_time_ms)}
         </span>
       </div>
+
+      {isDev && /^\d+$/.test(doc.id) && (
+        <div className="mt-3">
+          <PreviewProjectButton researchId={Number(doc.id)} variant="ghost" />
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-3 pt-3 border-t border-[var(--color-stroke)]">

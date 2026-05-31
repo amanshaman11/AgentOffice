@@ -13,6 +13,7 @@ import {
   Package,
 } from "lucide-react";
 import clsx from "clsx";
+import { PreviewProjectButton } from "@/components/shell/PreviewProjectButton";
 import { useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { useUiStore } from "@/lib/store/ui";
 import { useAgentStore } from "@/lib/store/agents";
@@ -186,10 +187,13 @@ function DeveloperRunActions({
 }: {
   meta: NonNullable<ChatMessage["developerMeta"]>;
 }) {
-  if (!meta.zipUrl && meta.filePaths.length === 0) return null;
+  if (meta.researchId == null && !meta.zipUrl && meta.filePaths.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-2 justify-start px-1">
+      {meta.researchId != null && (
+        <PreviewProjectButton researchId={meta.researchId} />
+      )}
       {meta.zipUrl && (
         <a
           href={meta.zipUrl}

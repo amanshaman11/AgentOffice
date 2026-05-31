@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 from typing import Callable
@@ -41,11 +42,19 @@ def make_planner(office_type: str = "research", *, model: str | None = None):
     return Planner(model=model)
 
 
-def build_agents(office_type: str = "research", *, model: str | None = None) -> dict[str, BaseAgent]:
+def build_agents(
+    office_type: str = "research",
+    *,
+    model: str | None = None,
+    code_model: str | None = None,
+) -> dict[str, BaseAgent]:
     """Return the agent registry for ``office_type``."""
 
     if office_type == "developer":
-        return build_developer_agents(model=model)
+        return build_developer_agents(
+            model=model,
+            code_model=code_model or os.getenv("OPENAI_CODE_MODEL", "gpt-5.4-mini"),
+        )
     return build_research_agents(model=model)
 
 

@@ -38,6 +38,7 @@ export interface RunResult extends OrchestrationResult {
 export interface HealthResponse {
   status: string;
   gemini_key: string;
+  openai_key: string;
 }
 
 export interface WorkflowSuggestion {
@@ -109,5 +110,44 @@ export function suggestWorkflow(
   return http<WorkflowSuggestion>("/api/suggest-workflow", {
     method: "POST",
     body: JSON.stringify({ query, office_type }),
+  });
+}
+
+export interface ProjectFile {
+  path: string;
+  content: string;
+  language: string;
+}
+
+export interface ProjectResponse {
+  success: boolean;
+  research_id: number;
+  query: string;
+  goal: string;
+  office_type: string;
+  artifact_url: string | null;
+  files: ProjectFile[];
+  setup_instructions: string;
+}
+
+export interface EditProjectResponse {
+  success: boolean;
+  research_id: number;
+  files: ProjectFile[];
+  setup_instructions: string;
+  artifact_url: string | null;
+}
+
+export function getProjectFiles(researchId: number): Promise<ProjectResponse> {
+  return http<ProjectResponse>(`/api/projects/${researchId}`);
+}
+
+export function editProject(
+  researchId: number,
+  instruction: string,
+): Promise<EditProjectResponse> {
+  return http<EditProjectResponse>(`/api/projects/${researchId}/edit`, {
+    method: "POST",
+    body: JSON.stringify({ instruction }),
   });
 }

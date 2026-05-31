@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from ...code_validator import issues_to_feedback, validate_files
 from ..base import BaseAgent
 from ..gemini_client import generate_json
 from ..schemas import AgentResult
-from .schemas import QAReport
+from .schemas import ExecutorOutput, QAReport
 
 
 class QAAgent(BaseAgent):
@@ -13,12 +14,19 @@ class QAAgent(BaseAgent):
 
     name = "qa"
     system_instruction = (
-        "You are a pragmatic QA engineer reviewing AI-generated prototype code. "
-        "Pass the review when the core idea is implemented, files are coherent, and "
-        "the project could be iterated on — even if polish is missing. Only fail for "
-        "blocker or major issues (missing entry point, empty files, completely wrong "
-        "stack, or criteria clearly unmet). Minor style gaps, missing tests, or small "
-        "imperfections should be noted as minor issues but must NOT fail the review."
+        "You are a strict QA engineer reviewing AI-generated code before it ships. "
+        "Your primary job is to catch bugs that would prevent the project from running. "
+        "FAIL (blocker or major) for ANY of these: syntax errors that prevent parsing, "
+        "import/require statements referencing non-existent local files or modules, "
+        "missing entry point (e.g. no main file, no index.html), "
+        "empty or near-empty files that are supposed to contain logic, "
+        "completely wrong tech stack vs the plan, "
+        "broken wiring (e.g. calling a function not defined anywhere in the project), "
+        "or acceptance criteria clearly unmet. "
+        "Mark as minor (do NOT fail): missing tests, style issues, incomplete docs, "
+        "optional polish, missing error handling in non-critical paths. "
+        "For every blocker/major issue, provide a precise fix description so the executor "
+        "can correct it. Be specific: name the file, line range, and exact change needed."
     )
 
     def _execute(self, query: str, context: dict[str, AgentResult]) -> AgentResult:
@@ -30,6 +38,15 @@ class QAAgent(BaseAgent):
                 success=False,
                 feedback="No code was provided by the executor.",
             )
+
+        static_feedback = self._run_static_validation(executor.output)
+        if static_feedback:
+            return AgentResult(
+                agent=self.name,
+                success=False,
+                feedback=static_feedback,
+            )
+
         prompt = (
             f"Product idea:\n{query}\n\nDevelopment plan (JSON):\n"
             f"{planner.output if planner else ''}\n\nGenerated files (JSON):\n"
@@ -51,3 +68,15 @@ class QAAgent(BaseAgent):
             for i in blocking
         ) or report.summary or "Code did not pass QA."
         return AgentResult(agent=self.name, success=False, feedback=feedback)
+
+    @staticmethod
+    def _run_static_validation(executor_output: str) -> str:
+        try:
+            files = ExecutorOutput.model_validate_json(executor_output).files
+        except Exception:
+            return "Executor output is not valid JSON or cannot be parsed."
+        issues = validate_files(files)
+        blockers = [i for i in issues if i.severity in {"blocker", "major"}]
+        if blockers:
+            return "Static validation failed:\n" + issues_to_feedback(blockers)
+        return ""
