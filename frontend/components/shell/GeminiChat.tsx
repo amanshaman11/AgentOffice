@@ -7,19 +7,21 @@ import {
   Trash2,
   PanelLeftClose,
   CornerDownLeft,
-  Eye,
+  Wand2,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
-import { useChatStore } from "@/lib/store/chat";
+import { useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { useUiStore } from "@/lib/store/ui";
 import { useAgentStore } from "@/lib/store/agents";
 import { GEMINI_MODEL_LABEL } from "@/lib/config";
+import { ROLES, type RoleId } from "@/lib/roles";
 
 export function GeminiChat() {
   const messages = useChatStore((s) => s.messages);
   const pending = useChatStore((s) => s.pending);
   const sendMessage = useChatStore((s) => s.sendMessage);
-  const previewPlan = useChatStore((s) => s.previewPlan);
+  const suggestWorkflow = useChatStore((s) => s.suggestWorkflow);
   const clear = useChatStore((s) => s.clear);
   const setActiveLeft = useUiStore((s) => s.setActiveLeft);
   const focusSignal = useUiStore((s) => s.chatFocusSignal);
@@ -46,9 +48,9 @@ export function GeminiChat() {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
-  const handlePreview = () => {
+  const handleSuggest = () => {
     if (!draft.trim() || pending || isRunning) return;
-    previewPlan(draft);
+    suggestWorkflow(draft);
     setDraft("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
@@ -109,7 +111,7 @@ export function GeminiChat() {
         {messages.length === 0 ? (
           <EmptyState />
         ) : (
-          messages.map((m) => <Bubble key={m.id} role={m.role} text={m.text} />)
+          messages.map((m) => <MessageItem key={m.id} message={m} />)
         )}
         {busy && <Bubble role="assistant" text="…" pulsing />}
       </div>
@@ -127,13 +129,13 @@ export function GeminiChat() {
             className="flex-1 resize-none bg-transparent text-sm placeholder:text-[var(--color-text-dim)] focus:outline-none max-h-[140px] disabled:opacity-50"
           />
           <button
-            onClick={handlePreview}
+            onClick={handleSuggest}
             disabled={disabled}
             className="btn-ghost !py-1.5 !px-2.5 disabled:opacity-40"
-            aria-label="Preview plan"
-            title="Preview plan (no run)"
+            aria-label="Suggest workflow"
+            title="Suggest workflow (no run)"
           >
-            <Eye size={14} />
+            <Wand2 size={14} />
           </button>
           <button
             onClick={handleSend}
@@ -148,12 +150,70 @@ export function GeminiChat() {
         <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-[var(--color-text-dim)]">
           <span className="inline-flex items-center gap-1">
             <CornerDownLeft size={10} />
-            Enter to run · Shift+Enter newline · Eye = plan only
+            Enter to run · Wand = suggest workflow
           </span>
           <span>{draft.length}</span>
         </div>
       </div>
     </aside>
+  );
+}
+
+function MessageItem({ message }: { message: ChatMessage }) {
+  if (!message.suggestedAgents) {
+    return <Bubble role={message.role} text={message.text} />;
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Bubble role={message.role} text={message.text} />
+      <ApplyWorkflowButton agents={message.suggestedAgents} />
+    </div>
+  );
+}
+
+function ApplyWorkflowButton({ agents }: { agents: string[] }) {
+  const [applied, setApplied] = useState(false);
+  const clearAgents = useAgentStore((s) => s.clearAgents);
+  const addAgent = useAgentStore((s) => s.addAgent);
+  const isRunning = useAgentStore((s) => s.run.isRunning);
+
+  const validAgents = agents.filter((a) => a in ROLES);
+
+  const handleApply = () => {
+    if (isRunning || validAgents.length === 0) return;
+    clearAgents();
+    for (const roleId of validAgents) {
+      addAgent(roleId as RoleId);
+    }
+    setApplied(true);
+    setTimeout(() => setApplied(false), 2000);
+  };
+
+  if (validAgents.length === 0) return null;
+
+  return (
+    <div className="flex justify-start">
+      <button
+        onClick={handleApply}
+        disabled={isRunning || applied}
+        className={clsx(
+          "btn-ghost text-[11px] !py-1 !px-2.5 flex items-center gap-1.5 transition",
+          applied && "text-[var(--color-neon-green)]",
+        )}
+      >
+        {applied ? (
+          <>
+            <Check size={12} />
+            Applied
+          </>
+        ) : (
+          <>
+            <Sparkles size={12} />
+            Apply to office
+          </>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -171,7 +231,7 @@ function EmptyState() {
       <div className="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
         Type a research question and hit Send.
         <br />
-        Agents in the room will walk through the steps.
+        Use the wand to get an AI workflow suggestion.
       </div>
     </div>
   );
@@ -189,12 +249,7 @@ function Bubble({
   const isUser = role === "user";
   const isSystem = role === "system";
   return (
-    <div
-      className={clsx(
-        "flex",
-        isUser ? "justify-end" : "justify-start",
-      )}
-    >
+    <div className={clsx("flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={clsx(
           "max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed border whitespace-pre-wrap break-words",
@@ -202,7 +257,8 @@ function Bubble({
             "bg-[color-mix(in_oklab,var(--color-neon-violet)_18%,transparent)] border-[color-mix(in_oklab,var(--color-neon-violet)_40%,transparent)] text-[var(--color-text-primary)]",
           isSystem &&
             "bg-transparent border-[color-mix(in_oklab,var(--color-neon-pink)_40%,transparent)] text-[var(--color-neon-pink)] italic",
-          !isUser && !isSystem &&
+          !isUser &&
+            !isSystem &&
             "bg-[var(--color-bg-2)] border-[var(--color-stroke)] text-[var(--color-text-primary)]",
           pulsing && "animate-pulse",
         )}
