@@ -125,7 +125,7 @@ export function LandingPage() {
 
       <nav className="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-6 py-4">
         <Image src="/agent_office.png" alt="AgentOffice" width={130} height={34} priority />
-        <Link href="/" className="btn-neon text-sm">
+        <Link href="/workflow" className="btn-neon text-sm">
           Open App
           <ArrowRight size={14} />
         </Link>
@@ -163,7 +163,7 @@ export function LandingPage() {
               receive validated results — no complex automation required.
             </p>
             <div className="flex flex-wrap gap-3 justify-center">
-              <Link href="/" className="btn-hero-primary">
+              <Link href="/workflow" className="btn-hero-primary">
                 Launch AgentOffice
                 <ArrowRight size={16} />
               </Link>
@@ -370,7 +370,7 @@ export function LandingPage() {
                 </div>
               ))}
             </div>
-            <Link href="/" className="btn-neon inline-flex">
+            <Link href="/workflow" className="btn-neon inline-flex">
               Build your workforce today
               <ArrowRight size={16} />
             </Link>
