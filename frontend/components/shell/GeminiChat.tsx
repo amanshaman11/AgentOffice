@@ -7,17 +7,23 @@ import {
   Trash2,
   PanelLeftClose,
   CornerDownLeft,
+  Eye,
 } from "lucide-react";
 import clsx from "clsx";
 import { useChatStore } from "@/lib/store/chat";
 import { useUiStore } from "@/lib/store/ui";
+import { useAgentStore } from "@/lib/store/agents";
+import { GEMINI_MODEL_LABEL } from "@/lib/config";
 
 export function GeminiChat() {
   const messages = useChatStore((s) => s.messages);
   const pending = useChatStore((s) => s.pending);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const previewPlan = useChatStore((s) => s.previewPlan);
   const clear = useChatStore((s) => s.clear);
   const setActiveLeft = useUiStore((s) => s.setActiveLeft);
+  const focusSignal = useUiStore((s) => s.chatFocusSignal);
+  const isRunning = useAgentStore((s) => s.run.isRunning);
 
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -29,9 +35,20 @@ export function GeminiChat() {
     }
   }, [messages.length, pending]);
 
+  useEffect(() => {
+    if (focusSignal > 0) textareaRef.current?.focus();
+  }, [focusSignal]);
+
   const handleSend = () => {
-    if (!draft.trim() || pending) return;
+    if (!draft.trim() || pending || isRunning) return;
     sendMessage(draft);
+    setDraft("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  const handlePreview = () => {
+    if (!draft.trim() || pending || isRunning) return;
+    previewPlan(draft);
     setDraft("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
@@ -50,9 +67,11 @@ export function GeminiChat() {
     el.style.height = Math.min(el.scrollHeight, 140) + "px";
   };
 
+  const busy = pending || isRunning;
+  const disabled = !draft.trim() || busy;
+
   return (
     <aside className="w-80 shrink-0 border-r border-[var(--color-stroke)] bg-[color-mix(in_oklab,var(--color-bg-1)_60%,transparent)] backdrop-blur-md flex flex-col min-h-0">
-      {/* Header */}
       <div className="px-3 py-2.5 border-b border-[var(--color-stroke)] flex items-center gap-2">
         <Sparkles
           size={14}
@@ -60,9 +79,9 @@ export function GeminiChat() {
           style={{ filter: "drop-shadow(0 0 6px var(--color-neon-violet))" }}
         />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium">Gemini</div>
+          <div className="text-sm font-medium">Gemini Office Chat</div>
           <div className="text-[10px] text-[var(--color-text-dim)]">
-            gemini-1.5-flash · not connected
+            {GEMINI_MODEL_LABEL} · runs the active office
           </div>
         </div>
         {messages.length > 0 && (
@@ -83,7 +102,6 @@ export function GeminiChat() {
         </button>
       </div>
 
-      {/* Messages */}
       <div
         ref={scrollRef}
         className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-2.5"
@@ -93,10 +111,9 @@ export function GeminiChat() {
         ) : (
           messages.map((m) => <Bubble key={m.id} role={m.role} text={m.text} />)
         )}
-        {pending && <Bubble role="assistant" text="…" pulsing />}
+        {busy && <Bubble role="assistant" text="…" pulsing />}
       </div>
 
-      {/* Composer */}
       <div className="p-2.5 border-t border-[var(--color-stroke)]">
         <div className="panel-raised p-2 flex items-end gap-2">
           <textarea
@@ -105,14 +122,25 @@ export function GeminiChat() {
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Ask Gemini…"
-            className="flex-1 resize-none bg-transparent text-sm placeholder:text-[var(--color-text-dim)] focus:outline-none max-h-[140px]"
+            placeholder="Ask the office a research question…"
+            disabled={busy}
+            className="flex-1 resize-none bg-transparent text-sm placeholder:text-[var(--color-text-dim)] focus:outline-none max-h-[140px] disabled:opacity-50"
           />
           <button
+            onClick={handlePreview}
+            disabled={disabled}
+            className="btn-ghost !py-1.5 !px-2.5 disabled:opacity-40"
+            aria-label="Preview plan"
+            title="Preview plan (no run)"
+          >
+            <Eye size={14} />
+          </button>
+          <button
             onClick={handleSend}
-            disabled={!draft.trim() || pending}
+            disabled={disabled}
             className="btn-neon !py-1.5 !px-2.5 disabled:opacity-40"
             aria-label="Send"
+            title="Send & run office"
           >
             <Send size={14} />
           </button>
@@ -120,7 +148,7 @@ export function GeminiChat() {
         <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-[var(--color-text-dim)]">
           <span className="inline-flex items-center gap-1">
             <CornerDownLeft size={10} />
-            Enter to send · Shift+Enter newline
+            Enter to run · Shift+Enter newline · Eye = plan only
           </span>
           <span>{draft.length}</span>
         </div>
@@ -138,12 +166,12 @@ function EmptyState() {
         style={{ filter: "drop-shadow(0 0 8px var(--color-neon-violet))" }}
       />
       <div className="text-sm text-[var(--color-text-primary)] mb-1">
-        Chat with Gemini
+        Run the office with a query
       </div>
       <div className="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
-        Ask anything — research questions, code, ideas.
+        Type a research question and hit Send.
         <br />
-        Backend wiring comes next.
+        Agents in the room will walk through the steps.
       </div>
     </div>
   );
@@ -159,6 +187,7 @@ function Bubble({
   pulsing?: boolean;
 }) {
   const isUser = role === "user";
+  const isSystem = role === "system";
   return (
     <div
       className={clsx(
@@ -168,10 +197,13 @@ function Bubble({
     >
       <div
         className={clsx(
-          "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border whitespace-pre-wrap break-words",
-          isUser
-            ? "bg-[color-mix(in_oklab,var(--color-neon-violet)_18%,transparent)] border-[color-mix(in_oklab,var(--color-neon-violet)_40%,transparent)] text-[var(--color-text-primary)]"
-            : "bg-[var(--color-bg-2)] border-[var(--color-stroke)] text-[var(--color-text-primary)]",
+          "max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed border whitespace-pre-wrap break-words",
+          isUser &&
+            "bg-[color-mix(in_oklab,var(--color-neon-violet)_18%,transparent)] border-[color-mix(in_oklab,var(--color-neon-violet)_40%,transparent)] text-[var(--color-text-primary)]",
+          isSystem &&
+            "bg-transparent border-[color-mix(in_oklab,var(--color-neon-pink)_40%,transparent)] text-[var(--color-neon-pink)] italic",
+          !isUser && !isSystem &&
+            "bg-[var(--color-bg-2)] border-[var(--color-stroke)] text-[var(--color-text-primary)]",
           pulsing && "animate-pulse",
         )}
       >
