@@ -1,4 +1,4 @@
-"""FastAPI server with streaming, export, history, and metrics."""
+"""FastAPI server with streaming, export, history, and metrics - fully integrated."""
 
 from __future__ import annotations
 
@@ -6,27 +6,38 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime
-from typing import AsyncIterator
 
 from dotenv import load_dotenv
+from email_validator import EmailNotValidError, validate_email
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
 from .agents import Orchestrator, Planner
 from .agents.orchestrator import OrchestrationResult
 from .agents.schemas import Plan
-from .email_service import send_research_email, is_email_configured
-from .metrics import get_metrics, MetricsSummary
+from .agents.streaming_orchestrator import StreamingOrchestrator
+from .database import (
+    get_agent_metrics_summary,
+    get_research_by_id,
+    get_research_history,
+    save_agent_metric,
+    save_research,
+    search_similar_research,
+)
+from .email_service import is_email_configured, send_research_email
+from .metrics import MetricsSummary, get_metrics
 from .pdf_generator import generate_research_pdf
-from .research_history import ResearchHistory, ResearchRecord
-from .supabase_client import upload_pdf, is_supabase_configured
+from .research_history import ResearchHistory
+from .supabase_client import is_supabase_configured, upload_pdf
+from .websocket_manager import manager
 
 load_dotenv()
 
-app = FastAPI(title="AgentOffice API", version="1.0.0")
+app = FastAPI(title="AgentOffice API", version="2.0.0")
 
 _origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
@@ -41,19 +52,13 @@ _metrics = get_metrics()
 
 
 class RunRequest(BaseModel):
-    query: str = Field(..., min_length=1)
-    use_cache: bool = Field(default=True)
+    query: str = Field(..., min_length=1, description="Research query")
+    use_cache: bool = Field(default=True, description="Use cached results if available")
 
 
-class ExportRequest(BaseModel):
-    query: str = Field(..., min_length=1)
-    email: EmailStr | None = None
-    generate_pdf: bool = Field(default=True)
-
-
-class StreamMessage(BaseModel):
-    type: str
-    data: dict
+class ExportEmailRequest(BaseModel):
+    research_id: int = Field(..., description="ID of research to export")
+    email: str = Field(..., description="Email address to send report to")
 
 
 def _clean(query: str) -> str:
@@ -67,9 +72,10 @@ def _clean(query: str) -> str:
 def health() -> dict:
     return {
         "status": "ok",
+        "version": "2.0.0",
         "gemini_key": "set" if os.getenv("GEMINI_API_KEY") else "missing",
-        "supabase": "configured" if is_supabase_configured() else "not configured",
-        "email": "configured" if is_email_configured() else "not configured",
+        "supabase": "configured" if is_supabase_configured() else "not_configured",
+        "email": "configured" if is_email_configured() else "not_configured",
         "uptime_seconds": _metrics.get_uptime_seconds(),
     }
 
@@ -83,7 +89,7 @@ def create_plan(req: RunRequest) -> Plan:
 async def run(req: RunRequest) -> OrchestrationResult:
     query = _clean(req.query)
     
-    if req.use_cache:
+    if req.use_cache and is_supabase_configured():
         cached = await _history.find_cached_result(query)
         if cached:
             return OrchestrationResult(
@@ -112,155 +118,19 @@ async def run(req: RunRequest) -> OrchestrationResult:
         agent_results=agent_results,
     )
     
-    if result.success:
-        await _history.save_research(
+    try:
+        research_id = save_research(
             query=query,
             goal=result.goal,
             success=result.success,
             final_output=result.final_output,
+            plan=result.plan.model_dump(),
+            outputs={k: v.model_dump() for k, v in result.outputs.items()},
+            log=result.log,
             execution_time_ms=execution_time_ms,
         )
-    
-    return result
-
-
-@app.post("/api/export")
-async def export_research(req: ExportRequest) -> dict:
-    query = _clean(req.query)
-    
-    cached = await _history.find_cached_result(query)
-    if not cached:
-        raise HTTPException(
-            status_code=404,
-            detail="No research found for this query. Please run the research first.",
-        )
-    
-    response_data = {"success": True, "pdf_url": None, "email_sent": False}
-    
-    if req.generate_pdf:
-        pdf_data = generate_research_pdf(cached.goal, cached.final_output)
         
-        if is_supabase_configured():
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            filename = f"research/{timestamp}_{cached.query_hash}.pdf"
-            
-            try:
-                pdf_url = await upload_pdf(filename, pdf_data)
-                response_data["pdf_url"] = pdf_url
-            except Exception as error:
-                print(f"PDF upload failed: {error}")
-        
-        if req.email and is_email_configured():
-            try:
-                await send_research_email(
-                    to_email=req.email,
-                    subject=f"Research Report: {cached.goal}",
-                    body=f"Your research report for '{cached.goal}' is attached.\n\nGenerated by AgentOffice.",
-                    pdf_data=pdf_data,
-                    pdf_filename=f"research_{cached.query_hash}.pdf",
-                )
-                response_data["email_sent"] = True
-            except Exception as error:
-                response_data["email_error"] = str(error)
-    
-    return response_data
-
-
-@app.get("/api/history", response_model=list[ResearchRecord])
-async def get_history(limit: int = 10) -> list[ResearchRecord]:
-    if not is_supabase_configured():
-        return []
-    
-    return await _history.get_recent_history(limit=min(limit, 50))
-
-
-@app.get("/api/metrics", response_model=MetricsSummary)
-def get_metrics_summary(hours: int | None = None) -> MetricsSummary:
-    return _metrics.get_summary(last_n_hours=hours)
-
-
-@app.get("/api/export/pdf/{query_hash}")
-async def download_pdf(query_hash: str) -> Response:
-    if not is_supabase_configured():
-        raise HTTPException(status_code=503, detail="Supabase not configured.")
-    
-    records = await _history.get_recent_history(limit=100)
-    record = next((r for r in records if r.query_hash == query_hash), None)
-    
-    if not record:
-        raise HTTPException(status_code=404, detail="Research not found.")
-    
-    pdf_data = generate_research_pdf(record.goal, record.final_output)
-    
-    return Response(
-        content=pdf_data,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="research_{query_hash}.pdf"'
-        },
-    )
-
-
-@app.websocket("/api/stream")
-async def websocket_stream(websocket: WebSocket):
-    await websocket.accept()
-    
-    try:
-        data = await websocket.receive_text()
-        request = json.loads(data)
-        query = _clean(request.get("query", ""))
-        
-        await websocket.send_json({
-            "type": "status",
-            "data": {"message": "Planning research...", "step": 0}
-        })
-        
-        plan = Planner().create_plan(query)
-        
-        await websocket.send_json({
-            "type": "plan",
-            "data": {"goal": plan.goal, "steps": len(plan.steps)}
-        })
-        
-        await websocket.send_json({
-            "type": "status",
-            "data": {"message": "Starting agents...", "step": 0}
-        })
-        
-        start_time = time.time()
-        result = Orchestrator().run(query)
-        execution_time_ms = int((time.time() - start_time) * 1000)
-        
-        for idx, log_entry in enumerate(result.log):
-            await websocket.send_json({
-                "type": "log",
-                "data": {"message": log_entry, "index": idx}
-            })
-            await asyncio.sleep(0.1)
-        
-        await websocket.send_json({
-            "type": "complete",
-            "data": {
-                "success": result.success,
-                "final_output": result.final_output,
-                "execution_time_ms": execution_time_ms,
-            }
-        })
-        
-        agent_results = {
-            agent: output.success
-            for agent, output in result.outputs.items()
-        }
-        
-        _metrics.record_execution(
-            query=query,
-            goal=result.goal,
-            success=result.success,
-            execution_time_ms=execution_time_ms,
-            agent_results=agent_results,
-        )
-        
-        if result.success:
+        if result.success and is_supabase_configured():
             await _history.save_research(
                 query=query,
                 goal=result.goal,
@@ -268,13 +138,226 @@ async def websocket_stream(websocket: WebSocket):
                 final_output=result.final_output,
                 execution_time_ms=execution_time_ms,
             )
+    except Exception as error:
+        print(f"Warning: Failed to save research: {error}")
+    
+    return result
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
+    await manager.connect(session_id, websocket)
+    try:
+        data = await websocket.receive_json()
+        query = data.get("query", "").strip()
+        
+        if not query:
+            await manager.send_error(session_id, "Query must not be empty")
+            return
+        
+        start_time = time.time()
+        orchestrator = StreamingOrchestrator()
+        
+        async def on_progress(step: int, total: int, agent: str, status: str, message: str):
+            await manager.send_progress(session_id, step, total, agent, status, message)
+        
+        async def on_agent_complete(agent: str, output: str, success: bool):
+            await manager.send_agent_output(session_id, agent, output, success)
+        
+        result, metrics = await orchestrator.run_with_streaming(
+            query,
+            on_progress=on_progress,
+            on_agent_complete=on_agent_complete,
+        )
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        research_id = None
+        try:
+            research_id = save_research(
+                query=query,
+                goal=result.goal,
+                success=result.success,
+                final_output=result.final_output,
+                plan=result.plan.model_dump(),
+                outputs={k: v.model_dump() for k, v in result.outputs.items()},
+                log=result.log,
+                execution_time_ms=execution_time_ms,
+            )
+            
+            for metric in metrics:
+                save_agent_metric(research_id=research_id, **metric)
+            
+            if result.success and is_supabase_configured():
+                await _history.save_research(
+                    query=query,
+                    goal=result.goal,
+                    success=result.success,
+                    final_output=result.final_output,
+                    execution_time_ms=execution_time_ms,
+                )
+        except Exception as error:
+            print(f"Warning: Failed to save research: {error}")
+        
+        await manager.send_completion(session_id, result.success, result.final_output, research_id)
     
     except WebSocketDisconnect:
-        pass
+        manager.disconnect(session_id)
     except Exception as error:
-        await websocket.send_json({
-            "type": "error",
-            "data": {"message": str(error)}
-        })
+        await manager.send_error(session_id, str(error))
     finally:
-        await websocket.close()
+        manager.disconnect(session_id)
+
+
+@app.get("/api/history")
+def get_history_local(limit: int = 50) -> dict:
+    try:
+        history = get_research_history(limit)
+        return {"success": True, "history": history, "source": "local"}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/api/history/cloud")
+async def get_history_cloud(limit: int = 10) -> dict:
+    if not is_supabase_configured():
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+    
+    history = await _history.get_recent_history(limit=min(limit, 50))
+    return {"success": True, "history": [h.model_dump() for h in history], "source": "cloud"}
+
+
+@app.get("/api/research/{research_id}")
+def get_research(research_id: int) -> dict:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Research not found")
+    return research
+
+
+@app.get("/api/search")
+def search_research(q: str) -> dict:
+    if not q or len(q.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Query must be at least 3 characters")
+    
+    results = search_similar_research(q.strip())
+    return {"success": True, "results": results}
+
+
+@app.get("/api/metrics")
+def get_metrics_endpoint(hours: int | None = None) -> MetricsSummary:
+    return _metrics.get_summary(last_n_hours=hours)
+
+
+@app.get("/api/metrics/agents")
+def get_agent_metrics() -> dict:
+    try:
+        metrics = get_agent_metrics_summary()
+        return {"success": True, "metrics": metrics}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/api/export/pdf/{research_id}")
+async def export_pdf(research_id: int) -> Response:
+    research = get_research_by_id(research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Research not found")
+    
+    try:
+        pdf_data = generate_research_pdf(
+            query=research["query"],
+            goal=research["goal"],
+            final_output=research["final_output"],
+            created_at=research.get("created_at"),
+        )
+        
+        if is_supabase_configured():
+            try:
+                file_path = f"research/{research_id}_{int(time.time())}.pdf"
+                await upload_pdf(file_path, pdf_data)
+            except Exception as error:
+                print(f"Warning: Failed to upload PDF to Supabase: {error}")
+        
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=research_{research_id}.pdf"
+            },
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {error}")
+
+
+@app.post("/api/export/email")
+async def export_email(req: ExportEmailRequest) -> dict:
+    if not is_email_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Email service not configured. Set SMTP environment variables.",
+        )
+    
+    try:
+        email_info = validate_email(req.email, check_deliverability=False)
+        recipient_email = email_info.normalized
+    except EmailNotValidError as error:
+        raise HTTPException(status_code=400, detail=f"Invalid email: {error}")
+    
+    research = get_research_by_id(req.research_id)
+    if not research:
+        raise HTTPException(status_code=404, detail="Research not found")
+    
+    try:
+        pdf_data = generate_research_pdf(
+            query=research["query"],
+            goal=research["goal"],
+            final_output=research["final_output"],
+            created_at=research.get("created_at"),
+        )
+        
+        pdf_url = None
+        if is_supabase_configured():
+            try:
+                file_path = f"research/{req.research_id}_{int(time.time())}.pdf"
+                pdf_url = await upload_pdf(file_path, pdf_data)
+            except Exception as error:
+                print(f"Warning: Failed to upload PDF to Supabase: {error}")
+        
+        subject = f"Research Report: {research['query'][:50]}"
+        body = f"""Hello,
+
+Please find attached your research report from AgentOffice.
+
+Research Query: {research['query']}
+Research Goal: {research['goal']}
+Generated: {datetime.fromisoformat(research['created_at']).strftime('%B %d, %Y at %I:%M %p UTC')}
+
+"""
+        
+        if pdf_url:
+            body += f"You can also view your report online at: {pdf_url}\n\n"
+        
+        body += """Best regards,
+AgentOffice Team
+
+---
+This is an automated email from AgentOffice Research System.
+"""
+        
+        await send_research_email(
+            to_email=recipient_email,
+            subject=subject,
+            body=body,
+            pdf_data=pdf_data,
+            pdf_filename=f"research_{req.research_id}.pdf",
+        )
+        
+        return {
+            "success": True,
+            "message": f"Research report sent to {recipient_email}",
+            "pdf_url": pdf_url,
+        }
+    
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {error}")
